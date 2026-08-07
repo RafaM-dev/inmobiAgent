@@ -14,12 +14,13 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:migrate": "pnpm db:provision && prisma migrate dev",
+    "db:deploy": "pnpm db:provision && prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:validate": "prisma validate",
     "db:seed": "tsx --env-file=../../.env prisma/seed/seed.ts",
-    "chat": "tsx --env-file=../../.env scripts/chat.ts"
+    "chat": "tsx --env-file=../../.env scripts/chat.ts",
+    "db:provision": "tsx --env-file=../../.env scripts/provision-db-role.ts"
   },
   "dependencies": {
     "@agentinmobi/contracts": "workspace:*",

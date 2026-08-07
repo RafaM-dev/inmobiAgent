@@ -162,8 +162,8 @@ describe("Búsqueda de conocimiento (Postgres real: pgvector + full-text españo
     expect(conElModeloCorrecto.length).toBeGreaterThan(0);
 
     // Se simula haber cambiado de proveedor de embeddings sin reindexar.
-    await context.prisma.$executeRawUnsafe(
-      "UPDATE document_chunks SET embedding_model = 'otro-modelo-v2'",
+    await context.sql((tx) =>
+      tx.$executeRawUnsafe("UPDATE document_chunks SET embedding_model = 'otro-modelo-v2'"),
     );
 
     const conModeloDistinto = await asTenant(tenant.tenantId, () =>
@@ -186,8 +186,8 @@ describe("Búsqueda de conocimiento (Postgres real: pgvector + full-text españo
 
     expect(segundo).toBe(primero);
 
-    const fragmentos = await context.prisma.documentChunk.count();
-    const documentos = await context.prisma.document.count();
+    const fragmentos = await context.sql((tx) => tx.documentChunk.count());
+    const documentos = await context.sql((tx) => tx.document.count());
 
     expect(documentos).toBe(1);
     // Fragmentos duplicados es como un RAG empieza a contradecirse a sí mismo.
@@ -225,6 +225,6 @@ describe("Búsqueda de conocimiento (Postgres real: pgvector + full-text españo
     // Un documento borrado cuyos fragmentos siguen indexados haría que el
     // agente citara una fuente que ya no existe: peor que no responder.
     expect((await preguntar("¿se admiten mascotas?")).found).toBe(false);
-    expect(await context.prisma.documentChunk.count()).toBe(0);
+    expect(await context.sql((tx) => tx.documentChunk.count())).toBe(0);
   });
 });

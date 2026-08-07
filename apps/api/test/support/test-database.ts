@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { provisionAppRole } from "../../scripts/provision-db-role";
 
 /**
  * Base de datos de los tests de integración.
@@ -32,8 +33,8 @@ const TEST_DB_SUFFIX = "_test";
  * qué Postgres apuntar, y cualquier otra variable del `.env` de desarrollo
  * filtrándose en los tests sería una fuente de fallos difíciles de ver.
  */
-const readDevDatabaseUrl = (): string => {
-  const fromEnv = process.env["DATABASE_URL"];
+const readEnvUrl = (variable: "DATABASE_URL" | "DATABASE_ADMIN_URL"): string => {
+  const fromEnv = process.env[variable];
   if (fromEnv) return fromEnv;
 
   const envFile = resolve(repoRoot, ".env");
@@ -46,9 +47,9 @@ const readDevDatabaseUrl = (): string => {
 
   const line = readFileSync(envFile, "utf8")
     .split(/\r?\n/)
-    .find((row) => row.trimStart().startsWith("DATABASE_URL="));
+    .find((row) => row.trimStart().startsWith(`${variable}=`));
 
-  if (!line) throw new Error("El .env no define DATABASE_URL");
+  if (!line) throw new Error(`El .env no define ${variable}`);
   return line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "");
 };
 
@@ -80,11 +81,16 @@ const toMaintenanceUrl = (url: string): string => {
  * parece al de producción, pero no es el mismo.
  */
 export const prepareTestDatabase = async (): Promise<string> => {
-  const devUrl = readDevDatabaseUrl();
-  const testUrl = toTestDatabaseUrl(devUrl);
+  const testUrl = toTestDatabaseUrl(readEnvUrl("DATABASE_URL"));
+  const testAdminUrl = toTestDatabaseUrl(readEnvUrl("DATABASE_ADMIN_URL"));
   const testName = databaseNameOf(testUrl);
 
-  const admin = new PrismaClient({ datasources: { db: { url: toMaintenanceUrl(testUrl) } } });
+  /*
+   * La base se crea con el ADMINISTRADOR: el rol de la aplicación no puede
+   * crear bases de datos, y eso es a propósito — es el mismo rol sin
+   * superusuario que hace que Row Level Security proteja algo.
+   */
+  const admin = new PrismaClient({ datasources: { db: { url: toMaintenanceUrl(testAdminUrl) } } });
 
   try {
     await admin.$connect();
@@ -111,6 +117,10 @@ export const prepareTestDatabase = async (): Promise<string> => {
   } finally {
     await admin.$disconnect();
   }
+
+  // Extensiones, rol y permisos sobre la base recién creada. Sin esto, las
+  // migraciones fallarían y —peor— RLS no protegería nada.
+  await provisionAppRole({ adminUrl: testAdminUrl, appUrl: testUrl });
 
   execFileSync("npx", ["prisma", "migrate", "deploy"], {
     cwd: apiRoot,

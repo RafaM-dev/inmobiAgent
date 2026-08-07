@@ -123,7 +123,8 @@ proveedor sea cambiar una variable y no reescribir el agente.
 | `pnpm test` | Tests unitarios. No necesita infraestructura |
 | `pnpm test:integration` | Postgres real: crea la base `…_test`, migra y ejecuta |
 | `pnpm infra:up` / `infra:down` | Postgres (pgvector) y Mailpit |
-| `pnpm db:migrate` | Migraciones de Prisma |
+| `pnpm db:provision` | Crea el rol sin superusuario de la aplicación y sus permisos |
+| `pnpm db:migrate` | Provisiona el rol y aplica las migraciones |
 | `pnpm db:seed` | Inmobiliaria de demostración, su canal y su documentación |
 
 El seed acepta parámetros, útil para comprobar el aislamiento entre inmobiliarias:
@@ -154,13 +155,14 @@ docs/           Arquitectura y decisiones
 - menciona un proveedor de inmuebles fuera de su adaptador;
 - usa un SDK de IA fuera de `agent/infrastructure/llm`;
 - importa Prisma fuera de `infrastructure/persistence`;
-- introduce una dependencia circular.
+- introduce una dependencia circular;
+- añade una tabla con `tenant_id` sin protegerla con RLS ni justificar la excepción.
 
 No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-452 tests unitarios con dobles en memoria, y 39 de integración contra Postgres
+452 tests unitarios con dobles en memoria, y 47 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -188,7 +190,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste por inmobiliaria ✅ · rate limiting, OpenTelemetry, RLS | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · rate limiting, OpenTelemetry | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy
@@ -232,8 +234,11 @@ CLI · WhatsApp · simulador ──HTTP──▶ channels ──evento──▶ 
   procedencia y su confianza: lo que dice el cliente siempre gana sobre lo que el sistema
   deduce, y el cliente puede corregirse. Es una función pura, testeada, sin un solo token.
 - **Reintentar no duplica.** Un webhook reenviado se descarta por `external_message_id`.
-- **Multi-tenant de verdad.** El mismo teléfono escribiendo a dos inmobiliarias son dos
-  clientes distintos, con conversaciones y memoria separadas.
+- **Multi-tenant de verdad, en tres capas.** El mismo teléfono escribiendo a dos
+  inmobiliarias son dos clientes distintos, con conversaciones y memoria separadas.
+  Lo garantizan el contexto de ejecución, el filtro de cada repositorio y —desde F9—
+  **Row Level Security en Postgres**, que se niega aunque el código se equivoque: una
+  consulta sin `WHERE` devuelve solo lo tuyo, y sin contexto no devuelve nada.
 - **Nada de OpenAI en el código.** El agente conoce `LLMProvider`; hoy lo implementa un
   simulador determinista. Los proveedores reales (F8) pasarán la misma suite de contrato
   que ya pasa el mock — por eso `LLM_PROVIDER=openai` será todo el cambio.

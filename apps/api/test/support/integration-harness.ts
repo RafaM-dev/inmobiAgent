@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { Application } from "../../src/bootstrap/application";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { loadConfig, type AppConfig } from "../../src/platform/config/env";
-import { Database } from "../../src/platform/database/prisma";
+import { Database, type PrismaTx } from "../../src/platform/database/prisma";
 import { NoopLogger } from "../../src/platform/logging/logger";
 import { truncateAll } from "./test-database";
 
@@ -75,7 +75,16 @@ export const withDatabase = async (): Promise<DatabaseContext> => {
 export interface ApplicationContext {
   readonly app: Application;
   readonly server: FastifyInstance;
+  /**
+   * Cliente CRUDO, sin contexto de tenant.
+   *
+   * Con RLS activo no ve nada de las tablas protegidas — que es justo lo que
+   * debe pasar. Para inspeccionar o manipular datos de negocio en un test, usa
+   * `sql()`, que cruza la frontera diciéndolo.
+   */
   readonly prisma: PrismaClient;
+  /** SQL crudo con acceso a todas las inmobiliarias. Para montar escenarios. */
+  sql<T>(fn: (tx: PrismaTx) => Promise<T>): Promise<T>;
   reset(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -103,6 +112,7 @@ export const withApplication = async (
     app: application,
     server,
     prisma,
+    sql: (fn) => application.cradle.database.runAcrossTenants("escenario de test", fn),
     reset: () => truncateAll(prisma),
     stop: async () => {
       await application.stop();
