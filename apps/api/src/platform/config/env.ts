@@ -50,6 +50,22 @@ const envSchema = z
     GEMINI_API_KEY: z.string().optional(),
     OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
 
+    /* Modelo concreto de cada proveedor. Vacío = el que el adaptador tenga por
+       defecto, que siempre es uno vigente y capaz. Se fija aquí cuando una
+       inmobiliaria quiere pagar menos o cuando hay que anclar una versión. */
+    ANTHROPIC_MODEL: z.string().optional(),
+    OPENAI_MODEL: z.string().optional(),
+    OLLAMA_MODEL: z.string().default("llama3.1"),
+
+    /* Profundidad de razonamiento. `low` por defecto porque este agente
+       responde por WhatsApp —donde la latencia se nota— y las decisiones que
+       de verdad importan (intención, escalamiento, fechas, precios) las toman
+       políticas deterministas, no el modelo. Solo lo entiende Anthropic; los
+       demás adaptadores lo ignoran. */
+    LLM_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("low"),
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(60_000),
+    LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+
     /* WhatsApp Cloud API. El App Secret y el token de verificación son de la
        APP de Meta —una sola para toda la plataforma—, mientras que el token de
        acceso es de cada número y vive cifrado en su cuenta de canal. Sin estos
@@ -130,6 +146,18 @@ export interface AppConfig {
       geminiApiKey?: string;
       ollamaBaseUrl: string;
     };
+    /** Modelo concreto por proveedor. Ausente = el que traiga el adaptador. */
+    models: {
+      anthropic?: string;
+      openai?: string;
+      ollama: string;
+    };
+    /** Ajustes que comparten todos los adaptadores de LLM. */
+    llmRuntime: {
+      effort: "low" | "medium" | "high" | "xhigh" | "max";
+      timeoutMs: number;
+      maxRetries: number;
+    };
   };
   readonly whatsapp: {
     /** `true` solo si la app de Meta está configurada. */
@@ -169,6 +197,16 @@ const toAppConfig = (env: Env): AppConfig => ({
       ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
       ...(env.GEMINI_API_KEY ? { geminiApiKey: env.GEMINI_API_KEY } : {}),
       ollamaBaseUrl: env.OLLAMA_BASE_URL,
+    },
+    models: {
+      ...(env.ANTHROPIC_MODEL ? { anthropic: env.ANTHROPIC_MODEL } : {}),
+      ...(env.OPENAI_MODEL ? { openai: env.OPENAI_MODEL } : {}),
+      ollama: env.OLLAMA_MODEL,
+    },
+    llmRuntime: {
+      effort: env.LLM_EFFORT,
+      timeoutMs: env.LLM_TIMEOUT_MS,
+      maxRetries: env.LLM_MAX_RETRIES,
     },
   },
   agent: {

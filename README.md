@@ -101,9 +101,14 @@ inmuebles. Los adaptadores por defecto son simulados y recorren el flujo complet
 pasar a un proveedor real solo cambia una variable:
 
 ```env
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+O `openai` (con `OPENAI_MODEL`), o `ollama` para un modelo en tu propia
+máquina, que no necesita ninguna clave. Los tres pasan la **misma suite de
+contrato** que ya pasa el simulador: eso es lo que hace que cambiar de
+proveedor sea cambiar una variable y no reescribir el agente.
 
 ## Comandos
 
@@ -155,7 +160,7 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-416 tests unitarios con dobles en memoria, y 33 de integración contra Postgres
+436 tests unitarios con dobles en memoria, y 33 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -182,8 +187,9 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F5 | knowledge / RAG: ingesta, pgvector, búsqueda híbrida, respuestas con cita | ✅ |
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
-| F8 | Proveedores reales de IA: OpenAI, Anthropic, Ollama | Siguiente |
-| F9–F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
+| F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
+| F9 | Producción: rate limiting por tenant, control de coste, OpenTelemetry, RLS | Siguiente |
+| F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy
 
@@ -214,6 +220,10 @@ CLI · WhatsApp · simulador ──HTTP──▶ channels ──evento──▶ 
 - **El simulador no tiene ruta propia.** Habla con el agente por la misma URL pública que
   usaría un cliente: mismo caso de uso, misma conversación, que aparece en el inbox como
   cualquier otra. Un atajo interno probaría un camino que nadie usa.
+- **La IA es un puerto, y F8 lo demostró.** Añadir Anthropic, OpenAI y Ollama fue
+  escribir adaptadores y añadir tres `case` a un `switch`. **Cero casos de uso
+  tocados.** Los tres pasan la misma suite de contrato que el simulador — por eso
+  cambiar de proveedor es cambiar una variable y no reescribir el agente.
 - **El canal no sabe nada del negocio, y F6 lo demostró.** Añadir WhatsApp fue implementar
   `ChatChannel` y añadir una línea a una lista. **Cero casos de uso tocados**: el mismo
   agente que busca inmuebles, agenda visitas y cita el reglamento funciona por WhatsApp

@@ -46,7 +46,9 @@ import {
 import { RunAgentTurnUseCase } from "./application/use-cases/run-agent-turn.use-case";
 import type { AgentRunRepository } from "./domain/repositories/agent-run.repository";
 import { RuleBasedSlotExtractor } from "./infrastructure/extraction/rule-based-slot-extractor";
+import { AnthropicLLMProvider } from "./infrastructure/llm/anthropic/anthropic-llm-provider";
 import { MockLLMProvider } from "./infrastructure/llm/mock/mock-llm-provider";
+import { OpenAiCompatibleLLMProvider } from "./infrastructure/llm/openai/openai-llm-provider";
 import { PrismaAgentRunRepository } from "./infrastructure/persistence/prisma/prisma-agent-run.repository";
 
 /* ========================================================================== *
@@ -99,15 +101,84 @@ export const agentModule: ModuleRegistration<Cradle> = {
        *
        * `LLM_PROVIDER=openai` en el entorno y aquí se construye otro adaptador;
        * ni un caso de uso, ni una política, ni una herramienta cambian. Los
-       * proveedores reales llegan en F8 y encajan en este `switch`.
+       * proveedores reales encajan en este `switch`: uno más es un `case` más.
        */
       llmProvider: asFunction((c: Cradle): LLMProvider => {
+        const { credentials, models, llmRuntime } = c.config.providers;
+        const logger = c.logger.child({ module: "agent", component: "llm" });
+
+        /**
+         * Falta una credencial: se falla AL ARRANCAR, no en el primer turno.
+         *
+         * Un proceso que levanta con `LLM_PROVIDER=anthropic` y sin clave
+         * descubriría el problema con un cliente esperando respuesta por
+         * WhatsApp. Aquí lo descubre quien despliega, en el segundo cero.
+         */
+        const requireCredential = (value: string | undefined, variable: string): string => {
+          if (!value) {
+            throw new Error(
+              `LLM_PROVIDER=${c.config.providers.llm} necesita ${variable}. ` +
+                "Con LLM_PROVIDER=mock el producto funciona entero sin ninguna clave.",
+            );
+          }
+          return value;
+        };
+
         switch (c.config.providers.llm) {
           case "mock":
             return new MockLLMProvider({ tokens: c.tokenCounter });
+
+          case "anthropic":
+            return new AnthropicLLMProvider({
+              options: {
+                apiKey: requireCredential(credentials.anthropicApiKey, "ANTHROPIC_API_KEY"),
+                ...(models.anthropic ? { model: models.anthropic } : {}),
+                effort: llmRuntime.effort,
+                timeoutMs: llmRuntime.timeoutMs,
+                maxRetries: llmRuntime.maxRetries,
+              },
+              logger,
+            });
+
+          case "openai":
+            return new OpenAiCompatibleLLMProvider({
+              options: {
+                id: "openai",
+                apiKey: requireCredential(credentials.openaiApiKey, "OPENAI_API_KEY"),
+                /*
+                 * Sin modelo por defecto, a diferencia de Anthropic. El
+                 * catálogo de OpenAI cambia deprisa y elegir uno por ti sería
+                 * decidir tu factura: se pide explícito.
+                 */
+                model: requireCredential(models.openai, "OPENAI_MODEL"),
+                timeoutMs: llmRuntime.timeoutMs,
+                maxRetries: llmRuntime.maxRetries,
+              },
+              logger,
+            });
+
+          case "ollama":
+            return new OpenAiCompatibleLLMProvider({
+              options: {
+                id: "ollama",
+                /*
+                 * Ollama expone un endpoint compatible con OpenAI y no pide
+                 * autenticación, pero el SDK exige una clave no vacía. Este
+                 * valor no viaja a ninguna parte que lo mire.
+                 */
+                apiKey: "ollama-no-necesita-clave",
+                model: models.ollama,
+                baseUrl: `${credentials.ollamaBaseUrl.replace(/\/+$/, "")}/v1`,
+                // Un modelo local en CPU tarda bastante más que una API.
+                timeoutMs: Math.max(llmRuntime.timeoutMs, 120_000),
+                maxRetries: llmRuntime.maxRetries,
+              },
+              logger,
+            });
+
           default:
             throw new Error(
-              `El proveedor "${c.config.providers.llm}" llega en F8. ` +
+              `El proveedor "${c.config.providers.llm}" todavía no tiene adaptador. ` +
                 "Usa LLM_PROVIDER=mock para el modo demo.",
             );
         }
