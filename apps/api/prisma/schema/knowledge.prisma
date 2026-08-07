@@ -1,0 +1,94 @@
+// Módulo knowledge: lo que la inmobiliaria sabe y el agente puede citar.
+//
+// El documento no guarda su texto: guarda de dónde vino, su huella y su estado.
+// El texto vive troceado en `document_chunks`, que es la unidad que se recupera
+// y se cita. Una tercera copia del original aquí solo envejecería por su lado.
+
+enum DocumentSourceType {
+  UPLOAD
+  URL
+  TEXT
+}
+
+enum DocumentStatus {
+  PENDING
+  INDEXING
+  INDEXED
+  FAILED
+}
+
+model KnowledgeCollection {
+  id            String     @id
+  tenantId      String     @map("tenant_id")
+  name          String
+  slug          String
+  description   String?
+  createdAt     DateTime   @map("created_at")
+  updatedAt     DateTime   @map("updated_at")
+
+  documents     Document[]
+
+  @@unique([tenantId, slug])
+  @@map("knowledge_collections")
+}
+
+model Document {
+  id             String              @id
+  tenantId       String              @map("tenant_id")
+  collectionId   String              @map("collection_id")
+  title          String
+  sourceType     DocumentSourceType  @map("source_type")
+  /// Ruta en `FileStorage` o URL de origen. Opaca para el dominio.
+  sourceRef      String?             @map("source_ref")
+  mimeType       String              @map("mime_type")
+  /// SHA-256 del texto extraído. Es la clave de idempotencia de la ingesta.
+  checksum       String
+  status         DocumentStatus
+  /// Sube en cada reindexado: distingue fragmentos viejos de nuevos.
+  version        Int                 @default(1)
+  chunkCount     Int                 @default(0) @map("chunk_count")
+  /// Modelo con el que se generaron los vectores actuales. Sin este dato no
+  /// hay forma de saber que una búsqueda está comparando espacios distintos.
+  embeddingModel String?             @map("embedding_model")
+  failureReason  String?             @map("failure_reason")
+  indexedAt      DateTime?           @map("indexed_at")
+  createdAt      DateTime            @map("created_at")
+  updatedAt      DateTime            @map("updated_at")
+
+  collection     KnowledgeCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  chunks         DocumentChunk[]
+
+  /// Subir dos veces el mismo reglamento no crea dos reglamentos.
+  @@unique([tenantId, collectionId, checksum])
+  @@index([tenantId, status])
+  @@index([tenantId, collectionId])
+  @@map("documents")
+}
+
+/// El fragmento es la unidad que se recupera y se cita.
+///
+/// `embedding` y `tsv` son columnas que Prisma no modela: el vector lo escribe
+/// el repositorio con SQL crudo y el `tsvector` lo genera Postgres. Los índices
+/// (HNSW y GIN) se crean en la migración.
+model DocumentChunk {
+  id             String                       @id
+  tenantId       String                       @map("tenant_id")
+  documentId     String                       @map("document_id")
+  ordinal        Int
+  /// Texto LITERAL del documento. Es lo que se cita, sin reescribir.
+  content        String
+  /// Epígrafe bajo el que aparece. Da contexto a la cita y al vector.
+  heading        String?
+  tokens         Int
+  embeddingModel String                       @map("embedding_model")
+  embedding      Unsupported("vector(1536)")?
+  tsv            Unsupported("tsvector")?
+  createdAt      DateTime                     @map("created_at")
+
+  document       Document                     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, ordinal])
+  /// La búsqueda solo compara dentro del mismo espacio vectorial.
+  @@index([tenantId, embeddingModel])
+  @@map("document_chunks")
+}

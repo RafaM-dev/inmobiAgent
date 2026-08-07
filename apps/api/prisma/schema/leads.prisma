@@ -1,0 +1,98 @@
+// Módulo leads: la ficha comercial de un cliente potencial.
+//
+// Es la tabla que un asesor abrirá dentro de tres semanas, cuando la
+// conversación ya se cerró. Por eso los requisitos se guardan aquí y no se leen
+// de la memoria conversacional: aquella cambia, ésta es la foto del momento.
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  SCHEDULED
+  WON
+  LOST
+}
+
+enum LeadBand {
+  COLD
+  WARM
+  HOT
+}
+
+model Lead {
+  id                    String                 @id
+  tenantId              String                 @map("tenant_id")
+  contactId             String                 @map("contact_id")
+  conversationId        String                 @map("conversation_id")
+  /// Canal por el que entró. Cadena opaca: leads no interpreta canales.
+  source                String
+  status                LeadStatus
+  /// Requisitos con el vocabulario del CRM (decisión D18), no el del catálogo.
+  requirements          Json
+  score                 Int                    @default(0)
+  band                  LeadBand               @default(COLD)
+  /// Motivos de la puntuación. Hacen auditable la priorización comercial.
+  scoreReasons          Json                   @map("score_reasons")
+  assignedUserId        String?                @map("assigned_user_id")
+  consentDataProcessing Boolean                @default(true) @map("consent_data_processing")
+  consentMarketing      Boolean                @default(false) @map("consent_marketing")
+  consentGrantedAt      DateTime?              @map("consent_granted_at")
+  visitRequested        Boolean                @default(false) @map("visit_requested")
+  createdAt             DateTime               @map("created_at")
+  updatedAt             DateTime               @map("updated_at")
+  lastActivityAt        DateTime               @map("last_activity_at")
+
+  interests             LeadPropertyInterest[]
+  events                LeadEvent[]
+
+  /// Idempotencia de la captura: una conversación, un lead. Es lo que impide
+  /// que un CRM se llene de duplicados en una semana.
+  @@unique([tenantId, conversationId])
+  /// Bandeja del back-office: por estado y por lo más reciente.
+  @@index([tenantId, status, lastActivityAt(sort: Desc)])
+  /// "Mis leads" de un asesor.
+  @@index([tenantId, assignedUserId, status])
+  /// Cola de prioridad comercial: los calientes primero.
+  @@index([tenantId, band, score(sort: Desc)])
+  @@map("leads")
+}
+
+/// Qué inmuebles le interesaron y cuántas veces volvió sobre ellos.
+///
+/// Guarda la REFERENCIA, no el inmueble: la copia de lo que se mostró ya vive
+/// en `property_snapshots`. Dos verdades sobre el mismo precio envejecerían a
+/// distinta velocidad.
+model LeadPropertyInterest {
+  id           String   @id
+  tenantId     String   @map("tenant_id")
+  leadId       String   @map("lead_id")
+  /// Formato `"source:externalId"`.
+  propertyRef  String   @map("property_ref")
+  firstShownAt DateTime @map("first_shown_at")
+  lastShownAt  DateTime @map("last_shown_at")
+  timesShown   Int      @default(1) @map("times_shown")
+
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, propertyRef])
+  /// "¿Quién ha preguntado por este inmueble?" — informe habitual del gerente.
+  @@index([tenantId, propertyRef])
+  @@map("lead_property_interests")
+}
+
+/// Histórico append-only. Nunca se actualiza ni se borra: es la respuesta a
+/// "¿por qué este lead está así?", y se escribe en la misma transacción que el
+/// cambio que lo produjo.
+model LeadEvent {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  leadId     String   @map("lead_id")
+  type       String
+  payload    Json
+  occurredAt DateTime @map("occurred_at")
+
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, leadId, occurredAt(sort: Desc)])
+  @@map("lead_events")
+}

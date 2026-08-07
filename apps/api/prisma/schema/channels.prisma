@@ -1,0 +1,69 @@
+// Módulo channels: por dónde entran y salen los mensajes.
+// Aquí NO hay lógica de negocio; solo la identidad de cada cuenta de canal.
+
+enum ChannelType {
+  CONSOLE
+  WEBCHAT
+  WHATSAPP
+  TELEGRAM
+  MESSENGER
+  INSTAGRAM
+}
+
+enum ChannelAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+/// Una cuenta de canal: el número de WhatsApp, el bot de Telegram o la sala de
+/// consola de una inmobiliaria.
+///
+/// `(channel_type, external_id)` es único en toda la plataforma porque es la
+/// clave con la que un mensaje entrante resuelve su tenant. Sin esa unicidad,
+/// un webhook podría acabar en la inmobiliaria equivocada.
+model ChannelAccount {
+  id          String               @id
+  tenantId    String               @map("tenant_id")
+  channelType ChannelType          @map("channel_type")
+  externalId  String               @map("external_id")
+  displayName String               @map("display_name")
+  status      ChannelAccountStatus @default(ACTIVE)
+  config      Json                 @default("{}")
+  /// Credenciales del proveedor cifradas con AES-256-GCM. Vacío hasta F6.
+  credentials Bytes?
+
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  @@unique([channelType, externalId])
+  @@index([tenantId, channelType])
+  @@map("channel_accounts")
+}
+
+/// Correlación entre NUESTRO mensaje y los del proveedor.
+///
+/// Existe porque la relación no es uno a uno: una respuesta nuestra se
+/// convierte en varios mensajes de WhatsApp —el texto, las fichas y los
+/// botones van por separado— y cada uno recibe sus propios acuses. Sin esta
+/// tabla, un "entregado" que llega media hora después no se puede atribuir a
+/// nada.
+model ChannelDelivery {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  channelAccountId  String   @map("channel_account_id")
+  conversationId    String   @map("conversation_id")
+  /// Nuestro `messages.id`.
+  messageId         String   @map("message_id")
+  /// `wamid.…` en WhatsApp. Único en todo el proveedor.
+  providerMessageId String   @map("provider_message_id")
+  status            String
+  reason            String?
+  sentAt            DateTime @map("sent_at")
+  updatedAt         DateTime @map("updated_at")
+
+  /// La clave por la que llegan los acuses.
+  @@unique([providerMessageId])
+  @@index([tenantId, messageId])
+  @@index([tenantId, conversationId, sentAt(sort: Desc)])
+  @@map("channel_deliveries")
+}

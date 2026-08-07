@@ -1,0 +1,104 @@
+import { z } from "zod";
+import { idSchema, slugSchema } from "../common/primitives";
+
+/**
+ * Configuración del agente.
+ *
+ * Lo que se configura aquí es **negocio, no modelo**: cómo se llama el
+ * asistente, con qué tono habla, en qué horario propone visitas y cuándo deja
+ * de intentarlo y llama a una persona. Nada de esto menciona un proveedor de IA,
+ * y por eso sobrevive a cambiar de proveedor.
+ *
+ * Lo que sí depende del proveedor viaja aparte, en `runtime`, y es de SOLO
+ * LECTURA: se elige por variable de entorno al desplegar, no desde una pantalla.
+ * Cambiar el modelo de embeddings desde el navegador invalidaría en silencio
+ * todo lo indexado (D25).
+ */
+
+export const agentToneSchema = z.enum(["FORMAL", "CERCANO", "NEUTRO"]);
+export type AgentToneContract = z.infer<typeof agentToneSchema>;
+
+export const businessHoursSchema = z.object({
+  /** Días activos, 0 = domingo. */
+  days: z.array(z.number().int().min(0).max(6)).min(1),
+  from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato HH:mm"),
+  to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato HH:mm"),
+});
+export type BusinessHoursContract = z.infer<typeof businessHoursSchema>;
+
+export const agentSettingsSchema = z.object({
+  agentDisplayName: z.string(),
+  tone: agentToneSchema,
+  welcomeMessage: z.string().optional(),
+  businessHours: businessHoursSchema.optional(),
+  /** Turnos seguidos con fallo antes de pasar la conversación a una persona. */
+  maxConsecutiveFailedTurns: z.number().int(),
+  handoffEmail: z.string().optional(),
+});
+export type AgentSettingsContract = z.infer<typeof agentSettingsSchema>;
+
+/** Cómo está desplegado el sistema. Solo lectura: lo fija el entorno. */
+export const runtimeInfoSchema = z.object({
+  llmProvider: z.string(),
+  embeddingProvider: z.string(),
+  /** `true` cuando ningún proveedor de pago está activo. */
+  demoMode: z.boolean(),
+});
+export type RuntimeInfoContract = z.infer<typeof runtimeInfoSchema>;
+
+export const channelAccountSchema = z.object({
+  id: idSchema,
+  channelType: z.enum(["CONSOLE", "WEBCHAT", "WHATSAPP", "TELEGRAM", "MESSENGER", "INSTAGRAM"]),
+  /** Identificador de la cuenta EN EL PROVEEDOR. */
+  externalId: z.string(),
+  displayName: z.string(),
+  isActive: z.boolean(),
+});
+export type ChannelAccountContract = z.infer<typeof channelAccountSchema>;
+
+/**
+ * Los canales viajan en SU PROPIA respuesta, no dentro de la configuración.
+ *
+ * No es una decisión estética: los canales son del módulo `channels`, que ya
+ * depende de `identity`. Meterlos en `/api/settings` obligaría a `identity` a
+ * conocer `channels` y cerraría un ciclo entre módulos — el primer paso para
+ * que un monolito modular deje de ser modular.
+ */
+export const channelAccountListResponseSchema = z.object({
+  items: z.array(channelAccountSchema),
+});
+export type ChannelAccountListResponse = z.infer<typeof channelAccountListResponseSchema>;
+
+export const settingsResponseSchema = z.object({
+  tenant: z.object({
+    id: idSchema,
+    slug: slugSchema,
+    name: z.string(),
+    locale: z.string(),
+    timezone: z.string(),
+    currency: z.string(),
+    plan: z.string(),
+  }),
+  agent: agentSettingsSchema,
+  runtime: runtimeInfoSchema,
+  /** `false` para roles que solo miran: la pantalla se pinta en modo lectura. */
+  canEdit: z.boolean(),
+});
+export type SettingsResponse = z.infer<typeof settingsResponseSchema>;
+
+/**
+ * Actualización parcial: solo se toca lo que viene. Enviar el objeto entero
+ * desde el navegador haría que dos asesores editando a la vez se pisaran
+ * campos que ninguno de los dos tocó.
+ */
+export const updateAgentSettingsRequestSchema = z
+  .object({
+    agentDisplayName: z.string().min(1).max(60),
+    tone: agentToneSchema,
+    welcomeMessage: z.string().max(500),
+    businessHours: businessHoursSchema,
+    maxConsecutiveFailedTurns: z.number().int().min(1).max(10),
+    handoffEmail: z.string().email().max(200),
+  })
+  .partial();
+export type UpdateAgentSettingsRequest = z.infer<typeof updateAgentSettingsRequestSchema>;

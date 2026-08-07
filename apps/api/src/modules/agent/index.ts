@@ -1,0 +1,227 @@
+import { asFunction, type AwilixContainer } from "awilix";
+import type { ModuleRegistration } from "../../platform/di/app-module";
+import type { PlatformCradle } from "../../platform/di/platform-cradle";
+import type { EventSubscription } from "../../platform/events/event";
+import { isErr } from "../../platform/result/result";
+import type { AppointmentsCradle } from "../appointments";
+import { defaultCapabilities, type ChannelsCradle } from "../channels";
+import type { CatalogCradle } from "../catalog";
+import type { ConversationCradle } from "../conversation";
+import type { IdentityCradle } from "../identity";
+import type { KnowledgeCradle } from "../knowledge";
+import type { LeadsCradle } from "../leads";
+import { onTurnReady } from "./application/event-handlers/on-turn-ready";
+import { CitationGuardrail } from "./application/guardrails/citation.guardrail";
+import {
+  GroundingGuardrail,
+  LengthGuardrail,
+  NoPromisesGuardrail,
+} from "./application/guardrails/grounding.guardrail";
+import type { Guardrail } from "./application/guardrails/guardrail";
+import {
+  HeuristicTokenCounter,
+  type LLMProvider,
+  type TokenCounter,
+} from "./application/ports/llm-provider";
+import type { SlotExtractor } from "./application/ports/slot-extractor";
+import { PromptRegistry } from "./application/prompts/prompt-registry";
+import { systemPromptV1 } from "./application/prompts/system-prompt.v1";
+import { ContextBuilder } from "./application/runtime/context-builder";
+import { ToolRegistry } from "./application/runtime/tool-registry";
+import { HandoffCoordinator } from "./application/services/handoff-coordinator";
+import {
+  createCheckAvailabilityTool,
+  createPropertyDetailsTool,
+  createPropertyMediaTool,
+} from "./application/tools/property-details.tool";
+import { createRegisterLeadTool } from "./application/tools/register-lead.tool";
+import { createSearchKnowledgeTool } from "./application/tools/search-knowledge.tool";
+import { createRequestHumanTool } from "./application/tools/request-human-agent.tool";
+import { createSearchPropertiesTool } from "./application/tools/search-properties.tool";
+import { createSavePreferencesTool } from "./application/tools/save-customer-preferences.tool";
+import {
+  createProposeVisitSlotsTool,
+  createScheduleVisitTool,
+} from "./application/tools/visit-scheduling.tools";
+import { RunAgentTurnUseCase } from "./application/use-cases/run-agent-turn.use-case";
+import type { AgentRunRepository } from "./domain/repositories/agent-run.repository";
+import { RuleBasedSlotExtractor } from "./infrastructure/extraction/rule-based-slot-extractor";
+import { MockLLMProvider } from "./infrastructure/llm/mock/mock-llm-provider";
+import { PrismaAgentRunRepository } from "./infrastructure/persistence/prisma/prisma-agent-run.repository";
+
+/* ========================================================================== *
+ * CONTRATO PÚBLICO DEL MÓDULO `agent`
+ * ========================================================================== */
+
+export type { LLMProvider, LlmMessage, LlmToolSchema } from "./application/ports/llm-provider";
+export type { AgentTool, ToolContext, ToolResult } from "./application/ports/agent-tool";
+export { toolOk, toolError } from "./application/ports/agent-tool";
+export {
+  AgentRunCompleted,
+  AgentRunFailed,
+  HandoffRequested,
+  type AgentRunCompletedPayload,
+  type HandoffRequestedPayload,
+} from "./application/events/agent.events";
+export { HandoffReason } from "./domain/policies/escalation.policy";
+export { Intent, classifyIntent } from "./domain/value-objects/intent";
+
+export interface AgentCradle {
+  llmProvider: LLMProvider;
+  tokenCounter: TokenCounter;
+  slotExtractor: SlotExtractor;
+  promptRegistry: PromptRegistry;
+  agentContextBuilder: ContextBuilder;
+  agentToolRegistry: ToolRegistry;
+  agentGuardrails: readonly Guardrail[];
+  handoffCoordinator: HandoffCoordinator;
+  agentRunRepository: AgentRunRepository;
+  runAgentTurn: RunAgentTurnUseCase;
+}
+
+type Cradle = PlatformCradle &
+  IdentityCradle &
+  ChannelsCradle &
+  ConversationCradle &
+  CatalogCradle &
+  LeadsCradle &
+  AppointmentsCradle &
+  KnowledgeCradle &
+  AgentCradle;
+
+export const agentModule: ModuleRegistration<Cradle> = {
+  name: "agent",
+
+  registerDependencies(container: AwilixContainer<Cradle>): void {
+    container.register({
+      /**
+       * ÚNICO punto del sistema donde se elige el proveedor de IA.
+       *
+       * `LLM_PROVIDER=openai` en el entorno y aquí se construye otro adaptador;
+       * ni un caso de uso, ni una política, ni una herramienta cambian. Los
+       * proveedores reales llegan en F8 y encajan en este `switch`.
+       */
+      llmProvider: asFunction((c: Cradle): LLMProvider => {
+        switch (c.config.providers.llm) {
+          case "mock":
+            return new MockLLMProvider({ tokens: c.tokenCounter });
+          default:
+            throw new Error(
+              `El proveedor "${c.config.providers.llm}" llega en F8. ` +
+                "Usa LLM_PROVIDER=mock para el modo demo.",
+            );
+        }
+      }).singleton(),
+
+      tokenCounter: asFunction((): TokenCounter => new HeuristicTokenCounter()).singleton(),
+
+      slotExtractor: asFunction((): SlotExtractor => new RuleBasedSlotExtractor()).singleton(),
+
+      promptRegistry: asFunction(() => {
+        const registry = new PromptRegistry();
+        registry.register(systemPromptV1);
+        return registry;
+      }).singleton(),
+
+      agentContextBuilder: asFunction(
+        (c: Cradle) => new ContextBuilder({ prompts: c.promptRegistry, tokens: c.tokenCounter }),
+      ).singleton(),
+
+      agentGuardrails: asFunction((): readonly Guardrail[] => [
+        // El orden importa: primero lo que no se puede enviar de ninguna forma,
+        // y al final los ajustes cosméticos. `citation` va antes que
+        // `grounding` porque puede sustituir el texto entero, y no tiene
+        // sentido validar cifras de un texto que se va a descartar.
+        new NoPromisesGuardrail(),
+        new CitationGuardrail(),
+        new GroundingGuardrail(),
+        new LengthGuardrail(),
+      ]).singleton(),
+
+      handoffCoordinator: asFunction(
+        (c: Cradle) =>
+          new HandoffCoordinator({
+            conversations: c.conversationService,
+            events: c.eventPublisher,
+            logger: c.logger.child({ module: "agent" }),
+          }),
+      ).singleton(),
+
+      /**
+       * Catálogo de herramientas: todo lo que el agente sabe hacer con el
+       * mundo. Cada una envuelve el PUERTO de otro módulo, nunca su
+       * implementación — por eso esta lista se lee como el alcance funcional
+       * del producto y no como un mapa de dependencias.
+       */
+      agentToolRegistry: asFunction((c: Cradle) => {
+        const registry = new ToolRegistry({
+          logger: c.logger.child({ module: "agent", component: "tools" }),
+          clock: c.clock,
+        });
+
+        registry.register(createSavePreferencesTool({ conversations: c.conversationService }));
+        registry.register(createRequestHumanTool({ handoff: c.handoffCoordinator }));
+        registry.register(
+          createSearchPropertiesTool({
+            catalog: c.catalogService,
+            conversations: c.conversationService,
+          }),
+        );
+        registry.register(createPropertyDetailsTool({ catalog: c.catalogService }));
+        registry.register(createCheckAvailabilityTool({ catalog: c.catalogService }));
+        registry.register(createPropertyMediaTool({ catalog: c.catalogService }));
+        registry.register(createSearchKnowledgeTool({ knowledge: c.knowledgeService }));
+        registry.register(createRegisterLeadTool({ leads: c.leadService }));
+        registry.register(
+          createProposeVisitSlotsTool({ appointments: c.appointmentService, clock: c.clock }),
+        );
+        registry.register(createScheduleVisitTool({ appointments: c.appointmentService }));
+
+        return registry;
+      }).singleton(),
+
+      agentRunRepository: asFunction(
+        (c: Cradle): AgentRunRepository => new PrismaAgentRunRepository(c.database, c.ids),
+      ).singleton(),
+
+      runAgentTurn: asFunction(
+        (c: Cradle) =>
+          new RunAgentTurnUseCase({
+            conversations: c.conversationService,
+            tenants: c.tenantDirectory,
+            llm: c.llmProvider,
+            tools: c.agentToolRegistry,
+            contextBuilder: c.agentContextBuilder,
+            slotExtractor: c.slotExtractor,
+            guardrails: c.agentGuardrails,
+            handoff: c.handoffCoordinator,
+            runs: c.agentRunRepository,
+            events: c.eventPublisher,
+            clock: c.clock,
+            ids: c.ids,
+            logger: c.logger.child({ module: "agent" }),
+            limits: {
+              maxIterations: c.config.agent.maxToolIterations,
+              maxToolCalls: c.config.agent.maxToolCalls,
+              timeoutMs: c.config.agent.turnTimeoutMs,
+            },
+            capabilitiesOf: async (channelAccountId: string) => {
+              const found = await c.getChannelCapabilities.execute(channelAccountId);
+              // Si la cuenta desapareció, se asume el canal más pobre posible:
+              // degradar de más es seguro, quedarse corto no.
+              return isErr(found) ? defaultCapabilities({ maxTextLength: 1000 }) : found.value;
+            },
+          }),
+      ).singleton(),
+    });
+  },
+
+  registerSubscriptions(cradle: Cradle): EventSubscription[] {
+    return [
+      onTurnReady({
+        runTurn: cradle.runAgentTurn,
+        logger: cradle.logger.child({ module: "agent" }),
+      }),
+    ];
+  },
+};

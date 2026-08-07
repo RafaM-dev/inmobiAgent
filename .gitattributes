@@ -1,0 +1,16 @@
+# Finales de línea normalizados: LF en el repositorio, siempre.
+#
+# Sin esto, un clon en Windows y otro en Linux producen diffs enteros de
+# ficheros que nadie tocó, y el `git blame` deja de servir para nada.
+* text=auto eol=lf
+
+# Binarios: que git no intente normalizarlos.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# El lockfile es generado: no tiene sentido revisarlo a mano en un diff.
+pnpm-lock.yaml linguist-generated=true -diff

@@ -1,0 +1,103 @@
+// Módulo identity: la inmobiliaria y su gente.
+// Frontera de todo dato del sistema: no existe tabla de negocio sin tenant_id.
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum TenantPlan {
+  TRIAL
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+/// La inmobiliaria. Agregado raíz.
+///
+/// `settings` va como JSONB y no como tabla aparte: es un Value Object del
+/// agregado, siempre se lee y escribe con él, y jamás se consulta por separado.
+/// Una tabla 1:1 solo añadiría un join a cada mensaje entrante.
+model Tenant {
+  id        String       @id
+  slug      String       @unique
+  name      String
+  status    TenantStatus @default(ACTIVE)
+  plan      TenantPlan   @default(TRIAL)
+  locale    String       @default("es-CO")
+  timezone  String       @default("America/Bogota")
+  currency  String       @default("COP")
+  settings  Json
+
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  users     User[]
+
+  @@index([status])
+  @@map("tenants")
+}
+
+/// Usuario interno: asesor o administrador. No es el cliente final.
+model User {
+  id           String     @id
+  tenantId     String     @map("tenant_id")
+  email        String
+  displayName  String     @map("display_name")
+  role         UserRole   @default(AGENT)
+  status       UserStatus @default(INVITED)
+  /// `scrypt$N$r$p$sal$hash`. Nulo mientras el usuario está invitado.
+  passwordHash String?    @map("password_hash")
+
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+
+  /// El correo identifica a la persona dentro de la inmobiliaria, no globalmente:
+  /// el mismo asesor puede trabajar para dos tenants distintos.
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@map("users")
+}
+
+/// Sesión del back-office (decisión D34).
+///
+/// Sesión opaca en servidor, no JWT: se puede revocar de verdad. Un token
+/// firmado sigue siendo válido hasta que caduca aunque despidan al asesor esa
+/// misma mañana, y en un producto multi-inmobiliaria eso no vale.
+///
+/// En la base solo vive el HASH del token; el token en claro existe únicamente
+/// en la cookie del navegador. Leer esta tabla no permite suplantar a nadie.
+model Session {
+  id         String    @id
+  tenantId   String    @map("tenant_id")
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  ipAddress  String?   @map("ip_address")
+  createdAt  DateTime  @map("created_at")
+  lastSeenAt DateTime  @map("last_seen_at")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}

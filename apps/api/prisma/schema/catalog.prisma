@@ -1,0 +1,75 @@
+// Módulo catalog: lo que le mostramos a un cliente, NO el catálogo.
+//
+// Aquí no hay una tabla de inmuebles y no la habrá. Guardamos referencias
+// (`source` + `external_id`) y copias inmutables de lo que se mostró. Si la
+// inmobiliaria cambia de proveedor, no se migra un solo dato de catálogo.
+
+enum CatalogOperation {
+  SALE
+  RENT
+}
+
+enum CatalogPropertyType {
+  APARTMENT
+  HOUSE
+  STUDIO
+  OFFICE
+  COMMERCIAL
+  LOT
+  WAREHOUSE
+  FARM
+}
+
+/// Copia inmutable de un inmueble en el momento en que se mostró.
+///
+/// Responde a "¿qué le prometimos exactamente a este cliente?". El precio del
+/// proveedor cambiará; esta fila no. El `checksum` identifica una versión de
+/// los datos: si el precio sube, se inserta una fila nueva en vez de un UPDATE.
+model PropertySnapshot {
+  id           String              @id
+  tenantId     String              @map("tenant_id")
+  /// Proveedor de origen. Opaco: no interpretamos su valor.
+  source       String
+  externalId   String              @map("external_id")
+  checksum     String
+
+  title        String
+  operation    CatalogOperation
+  type         CatalogPropertyType
+  /// Unidades mínimas de la moneda. Entero, nunca coma flotante.
+  priceAmount  BigInt              @map("price_amount")
+  currency     String
+  city         String
+  neighborhood String?
+  bedrooms     Int?
+  bathrooms    Int?
+  areaM2       Int?                @map("area_m2")
+  imageUrl     String?             @map("image_url")
+  url          String?
+  capturedAt   DateTime            @map("captured_at")
+
+  impressions  PropertyImpression[]
+
+  /// Una versión de los datos por inmueble y tenant: mostrar dos veces lo
+  /// mismo reutiliza la fila en lugar de duplicarla.
+  @@unique([tenantId, source, externalId, checksum])
+  @@index([tenantId, source, externalId])
+  @@map("property_snapshots")
+}
+
+/// Qué inmueble se le mostró a qué cliente y cuándo.
+/// Es la materia prima del interés de un lead (F4) y del embudo (F7).
+model PropertyImpression {
+  id             String           @id
+  tenantId       String           @map("tenant_id")
+  conversationId String           @map("conversation_id")
+  contactId      String           @map("contact_id")
+  snapshotId     String           @map("snapshot_id")
+  shownAt        DateTime         @map("shown_at")
+
+  snapshot       PropertySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, conversationId, shownAt(sort: Desc)])
+  @@index([tenantId, contactId, shownAt(sort: Desc)])
+  @@map("property_impressions")
+}

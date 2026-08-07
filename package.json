@@ -1,0 +1,48 @@
+{
+  "name": "agentinmobi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @agentinmobi/api --filter @agentinmobi/web dev",
+    "dev:api": "pnpm --filter @agentinmobi/api dev",
+    "dev:web": "pnpm --filter @agentinmobi/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md,yaml,yml}\"",
+    "arch:check": "depcruise apps/api/src --config .dependency-cruiser.cjs",
+    "arch:graph": "depcruise apps/api/src --config .dependency-cruiser.cjs --output-type dot > docs/diagrams/deps.dot",
+    "test": "pnpm -r test",
+    "verify": "pnpm typecheck && pnpm lint && pnpm arch:check && pnpm test",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:seed": "pnpm --filter @agentinmobi/api db:seed",
+    "db:migrate": "pnpm --filter @agentinmobi/api db:migrate",
+    "chat": "pnpm --filter @agentinmobi/api chat"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "dependency-cruiser": "catalog:",
+    "eslint": "catalog:",
+    "prettier": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  }
+}

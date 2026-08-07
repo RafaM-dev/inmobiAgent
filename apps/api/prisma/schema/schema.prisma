@@ -1,0 +1,18 @@
+// Configuración base del schema.
+//
+// El schema es MULTI-ARCHIVO a propósito: cada módulo del monolito modular
+// tiene su propio `.prisma` en esta carpeta. Así los límites del dominio son
+// visibles también en la capa de datos y la extracción a microservicio consiste
+// en llevarse un archivo.
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector, pg_trgm, unaccent, pgcrypto]
+}

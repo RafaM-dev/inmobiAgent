@@ -1,0 +1,71 @@
+// Módulo appointments: la agenda de visitas.
+//
+// El instante SIEMPRE en UTC. La zona horaria de la inmobiliaria decide qué
+// franjas existen y cómo se escriben, nunca cómo se guardan: una cita
+// almacenada en hora local se mueve sola en cuanto alguien toca una
+// configuración.
+
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  RESCHEDULED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model Appointment {
+  id                 String             @id
+  tenantId           String             @map("tenant_id")
+  contactId          String             @map("contact_id")
+  conversationId     String             @map("conversation_id")
+  /// Ficha comercial asociada. Puede faltar si la cita se creó desde el
+  /// back-office antes de que existiera el lead.
+  leadId             String?            @map("lead_id")
+  /// Inmueble a visitar, formato `"source:externalId"`. Opcional: también se
+  /// agendan visitas a la oficina para orientar al cliente.
+  propertyRef        String?            @map("property_ref")
+  status             AppointmentStatus
+  scheduledAt        DateTime           @map("scheduled_at")
+  durationMin        Int                @map("duration_min")
+  assignedUserId     String?            @map("assigned_user_id")
+  location           String?
+  notes              String?
+  requestedAt        DateTime           @map("requested_at")
+  confirmedAt        DateTime?          @map("confirmed_at")
+  cancelledAt        DateTime?          @map("cancelled_at")
+  cancellationReason String?            @map("cancellation_reason")
+  /// Marca de agua del recordatorio: es lo que impide mandarlo dos veces.
+  reminderSentAt     DateTime?          @map("reminder_sent_at")
+  createdAt          DateTime           @map("created_at")
+  updatedAt          DateTime           @map("updated_at")
+
+  events             AppointmentEvent[]
+
+  /// Agenda del día y detección de solapes.
+  @@index([tenantId, scheduledAt])
+  /// La cita viva de una conversación.
+  @@index([tenantId, conversationId, status])
+  /// "Mi agenda" de un asesor.
+  @@index([tenantId, assignedUserId, scheduledAt])
+  /// Barrido del job de recordatorios.
+  @@index([status, reminderSentAt, scheduledAt])
+  @@map("appointments")
+}
+
+/// Histórico append-only de la cita. Responde a "¿quién movió esta visita y
+/// cuándo?", que es una discusión con el cliente que no se puede ganar de
+/// memoria.
+model AppointmentEvent {
+  id            String      @id
+  tenantId      String      @map("tenant_id")
+  appointmentId String      @map("appointment_id")
+  type          String
+  payload       Json
+  occurredAt    DateTime    @map("occurred_at")
+
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, appointmentId, occurredAt(sort: Desc)])
+  @@map("appointment_events")
+}

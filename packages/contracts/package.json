@@ -1,0 +1,20 @@
+{
+  "name": "@agentinmobi/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo \"contracts se consume como fuente TypeScript\" && exit 0"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@agentinmobi/config-ts": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

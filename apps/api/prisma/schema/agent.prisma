@@ -1,0 +1,70 @@
+// Módulo agent: la traza de cada ejecución del agente.
+//
+// Estas tablas crecen rápido (una fila por turno y varias por paso). Están
+// pensadas para escritura barata y lectura por conversación; el análisis
+// agregado se hará sobre eventos en `analytics`, no aquí.
+
+enum AgentRunStatus {
+  RUNNING
+  COMPLETED
+  ESCALATED
+  FAILED
+}
+
+enum AgentStepType {
+  THOUGHT
+  TOOL_CALL
+  TOOL_RESULT
+  MESSAGE
+  GUARDRAIL
+}
+
+model AgentRun {
+  id               String         @id
+  tenantId         String         @map("tenant_id")
+  conversationId   String         @map("conversation_id")
+  /// Turno que originó la ejecución. Uno a uno.
+  turnId           String         @unique @map("turn_id")
+  status           AgentRunStatus
+  /// Modelo que respondió de verdad, no el que se pidió.
+  model            String?
+  promptVersion    String         @map("prompt_version")
+  promptTokens     Int            @default(0) @map("prompt_tokens")
+  completionTokens Int            @default(0) @map("completion_tokens")
+  /// Coste estimado en USD. Cero en modo demo, y esa es la gracia.
+  estimatedCostUsd Decimal        @default(0) @map("estimated_cost_usd") @db.Decimal(12, 6)
+  latencyMs        Int?           @map("latency_ms")
+  failureReason    String?        @map("failure_reason")
+  escalationReason String?        @map("escalation_reason")
+  startedAt        DateTime       @map("started_at")
+  finishedAt       DateTime?      @map("finished_at")
+
+  steps            AgentRunStep[]
+
+  /// Playground y depuración: la traza de una conversación, del último al primero.
+  @@index([conversationId, startedAt(sort: Desc)])
+  /// Control de coste por inmobiliaria (F9).
+  @@index([tenantId, startedAt(sort: Desc)])
+  @@map("agent_runs")
+}
+
+model AgentRunStep {
+  id         String        @id
+  runId      String        @map("run_id")
+  tenantId   String        @map("tenant_id")
+  ordinal    Int
+  type       AgentStepType
+  /// Herramienta o guardrail implicado, cuando aplica.
+  name       String?
+  /// Argumentos y resultados YA truncados: aquí no caben respuestas de 2 MB.
+  payload    Json
+  durationMs Int           @map("duration_ms")
+  error      String?
+  at         DateTime
+
+  run        AgentRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, ordinal])
+  @@index([tenantId, name])
+  @@map("agent_run_steps")
+}

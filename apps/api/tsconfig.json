@@ -1,0 +1,16 @@
+{
+  "extends": "@agentinmobi/config-ts/base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "prisma/seed/**/*.ts",
+    "scripts/**/*.ts",
+    "tsup.config.ts",
+    "vitest.config.ts",
+    "prisma.config.ts"
+  ],
+  "exclude": ["node_modules", "dist", "src/generated"]
+}

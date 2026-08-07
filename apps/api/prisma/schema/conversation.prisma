@@ -1,0 +1,178 @@
+// Módulo conversation: contactos, conversaciones, mensajes y memoria.
+// Es el módulo con más escritura del sistema: cada índice está justificado.
+
+enum ConversationStatus {
+  OPEN
+  BOT_PAUSED
+  HUMAN
+  CLOSED
+}
+
+enum ConversationStage {
+  NEW
+  DISCOVERY
+  SEARCHING
+  PRESENTING
+  SCHEDULING
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageAuthorType {
+  CONTACT
+  AGENT
+  HUMAN
+  SYSTEM
+}
+
+enum MessageStatus {
+  RECEIVED
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+/// El cliente final.
+model Contact {
+  id           String            @id
+  tenantId     String            @map("tenant_id")
+  displayName  String            @map("display_name")
+  primaryPhone String?           @map("primary_phone")
+  email        String?
+  locale       String            @default("es-CO")
+  tags         String[]          @default([])
+
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  identities   ContactIdentity[]
+  conversations Conversation[]
+  profile      ContactProfile?
+
+  @@index([tenantId, updatedAt(sort: Desc)])
+  @@index([tenantId, primaryPhone])
+  @@map("contacts")
+}
+
+/// Cómo se identifica un contacto en cada canal.
+///
+/// La unicidad es `(tenant_id, channel_type, external_id)` y NO
+/// `(channel_type, external_id)`: la misma persona, con el mismo número, puede
+/// escribir a dos inmobiliarias distintas, y para cada una es un cliente
+/// distinto con su propia memoria y su propio historial. Una unicidad global
+/// dejaba al segundo tenant sin identidad y recreando el contacto en cada
+/// mensaje. Corrige lo indicado en docs §10.2.
+model ContactIdentity {
+  id          String      @id
+  tenantId    String      @map("tenant_id")
+  contactId   String      @map("contact_id")
+  channelType ChannelType @map("channel_type")
+  externalId  String      @map("external_id")
+  displayName String?     @map("display_name")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, channelType, externalId])
+  @@index([tenantId, contactId])
+  @@map("contact_identities")
+}
+
+model Conversation {
+  id                String             @id
+  tenantId          String             @map("tenant_id")
+  contactId         String             @map("contact_id")
+  channelAccountId  String             @map("channel_account_id")
+  channelType       ChannelType        @map("channel_type")
+  externalContactId String             @map("external_contact_id")
+  status            ConversationStatus @default(OPEN)
+  stage             ConversationStage  @default(NEW)
+  assignedUserId    String?            @map("assigned_user_id")
+  lastActivityAt    DateTime           @map("last_activity_at")
+  closedAt          DateTime?          @map("closed_at")
+
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages          Message[]
+
+  /// Bandeja del back-office: conversaciones activas por orden de actividad.
+  @@index([tenantId, status, lastActivityAt(sort: Desc)])
+  /// Reanudación: ¿tiene este contacto una conversación viva en este canal?
+  @@index([contactId, channelAccountId, status])
+  @@map("conversations")
+}
+
+model Message {
+  id                String            @id
+  tenantId          String            @map("tenant_id")
+  conversationId    String            @map("conversation_id")
+  direction         MessageDirection
+  authorType        MessageAuthorType @map("author_type")
+  authorId          String?           @map("author_id")
+  /// Bloques del mensaje (InboundContent o ReplyBlock). Ver docs §7.4.
+  blocks            Json
+  /// Id en el proveedor. La idempotencia de los webhooks (docs §16) se apoya en
+  /// la unicidad `(tenant_id, external_message_id)`: dos proveedores distintos
+  /// pueden emitir el mismo identificador sin que uno bloquee al otro.
+  externalMessageId String?           @map("external_message_id")
+  providerMessageId String?           @map("provider_message_id")
+  status            MessageStatus
+  /// Turno que consumió el mensaje. NULL = pendiente de procesar.
+  turnId            String?           @map("turn_id")
+  failureReason     String?           @map("failure_reason")
+  sentAt            DateTime          @map("sent_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+
+  conversation      Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalMessageId])
+  /// Ventana de contexto: los últimos N mensajes de una conversación.
+  @@index([conversationId, sentAt(sort: Desc)])
+  /// Buffer de turno: mensajes entrantes que ningún turno ha reclamado.
+  @@index([conversationId, turnId])
+  @@map("messages")
+}
+
+/// Memoria estructurada del contacto (docs §11).
+///
+/// Los slots van en JSONB con su procedencia y confianza; las columnas sueltas
+/// existen solo donde hace falta filtrar desde el back-office sin abrir el JSON.
+model ContactProfile {
+  contactId  String   @id @map("contact_id")
+  tenantId   String   @map("tenant_id")
+  slots      Json     @default("{}")
+  freeNotes  String[] @default([]) @map("free_notes")
+  updatedAt  DateTime @map("updated_at")
+
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  facts      ProfileFact[]
+
+  @@index([tenantId, updatedAt(sort: Desc)])
+  @@map("contact_profiles")
+}
+
+/// Histórico append-only de la memoria: quién dijo qué, cuándo y con qué
+/// confianza. Es lo que permite auditar por qué el agente recomendó algo.
+model ProfileFact {
+  id         String         @id
+  tenantId   String         @map("tenant_id")
+  contactId  String         @map("contact_id")
+  slot       String
+  value      Json
+  source     String
+  confidence Float
+  recordedAt DateTime       @map("recorded_at")
+
+  profile    ContactProfile @relation(fields: [contactId], references: [contactId], onDelete: Cascade)
+
+  @@index([tenantId, contactId, recordedAt(sort: Desc)])
+  @@map("profile_facts")
+}

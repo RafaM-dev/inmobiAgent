@@ -1,0 +1,72 @@
+// Tablas del kernel de plataforma.
+// No pertenecen a ningún contexto de negocio: dan garantías técnicas
+// (entrega de eventos, idempotencia, auditoría) a todos los módulos.
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  DEAD_LETTERED
+}
+
+/// Bandeja de salida transaccional.
+/// El evento se escribe aquí en la MISMA transacción que el cambio de estado
+/// que lo produjo; el OutboxRelay lo publica después. Ver docs/00-ARCHITECTURE §9.
+model OutboxEvent {
+  id            String       @id @default(uuid(7))
+  /// Identidad del evento de negocio (la que ven los consumidores).
+  eventId       String       @unique @map("event_id")
+  type          String
+  version       Int          @default(1)
+  tenantId      String       @map("tenant_id")
+  occurredAt    DateTime     @map("occurred_at")
+  correlationId String       @map("correlation_id")
+  causationId   String?      @map("causation_id")
+  payload       Json
+
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  /// Momento a partir del cual el relay puede intentarlo (backoff exponencial).
+  availableAt   DateTime     @default(now()) @map("available_at")
+  publishedAt   DateTime?    @map("published_at")
+  lastError     String?      @map("last_error")
+
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  /// Índice parcial en la práctica: el relay solo consulta PENDING ordenado por availableAt.
+  @@index([status, availableAt])
+  @@index([tenantId, occurredAt])
+  @@index([correlationId])
+  @@map("outbox_events")
+}
+
+/// Bandeja de entrada: garantiza que cada handler procesa cada evento una sola
+/// vez, aunque el bus entregue duplicados ("at least once" → "effectively once").
+model InboxEvent {
+  eventId     String   @map("event_id")
+  handlerName String   @map("handler_name")
+  tenantId    String   @map("tenant_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@id([eventId, handlerName])
+  @@index([processedAt])
+  @@map("inbox_events")
+}
+
+/// Rastro de auditoría de acciones sensibles (cambios de configuración del
+/// agente, toma de control humano, exportación de leads).
+model AuditLog {
+  id            String   @id @default(uuid(7))
+  tenantId      String   @map("tenant_id")
+  actorType     String   @map("actor_type") // USER | SYSTEM | AGENT
+  actorId       String?  @map("actor_id")
+  action        String
+  resourceType  String   @map("resource_type")
+  resourceId    String?  @map("resource_id")
+  metadata      Json?
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, resourceType, resourceId])
+  @@map("audit_logs")
+}
