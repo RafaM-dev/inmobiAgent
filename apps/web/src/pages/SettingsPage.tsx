@@ -3,6 +3,7 @@ import type {
   ChannelAccountContract,
   SettingsResponse,
   UpdateAgentSettingsRequest,
+  UsageSummary,
 } from "@agentinmobi/contracts";
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from "react";
 import { api } from "../api/backoffice";
@@ -15,6 +16,10 @@ const TONES: readonly { value: AgentToneContract; label: string; hint: string }[
 ];
 
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] as const;
+
+/** Céntimos incluidos: un turno cuesta millonésimas y redondear lo esconde. */
+const money = (usd: number): string =>
+  usd.toLocaleString("es-CO", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
 const channelLabel = (channel: ChannelAccountContract): string =>
   channel.channelType === "CONSOLE" ? "Simulador" : channel.channelType;
@@ -35,6 +40,7 @@ const channelLabel = (channel: ChannelAccountContract): string =>
 export const SettingsPage = (): ReactNode => {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [channels, setChannels] = useState<ChannelAccountContract[]>([]);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [draft, setDraft] = useState<UpdateAgentSettingsRequest>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -56,6 +62,13 @@ export const SettingsPage = (): ReactNode => {
       .catch(() => {
         // Los canales son informativos: si fallan, la configuración sigue
         // siendo editable. No se convierte en un error de pantalla completa.
+      });
+
+    api
+      .usage()
+      .then(setUsage)
+      .catch(() => {
+        // Igual que los canales: informativo, no bloqueante.
       });
   }, []);
 
@@ -251,6 +264,48 @@ export const SettingsPage = (): ReactNode => {
                 patch({ handoffEmail: event.target.value });
               }}
             />
+          </label>
+        </fieldset>
+
+        <fieldset className="settings__group" disabled={!canEdit || busy}>
+          <legend>Gasto en IA</legend>
+
+          {usage !== null && (
+            <div className="usage">
+              <div className="usage__figures">
+                <strong>{money(usage.spentUsd)}</strong>
+                <span className="hint">
+                  {usage.limitUsd > 0 ? `de ${money(usage.limitUsd)}` : "sin tope"} ·{" "}
+                  {usage.turns} turnos en {usage.period}
+                </span>
+              </div>
+              {usage.limitUsd > 0 && (
+                <div className="usage__bar">
+                  <div
+                    className={`usage__fill${usage.ratio >= 0.8 ? " is-warning" : ""}`}
+                    style={{ width: `${String(Math.min(usage.ratio * 100, 100))}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <label className="field">
+            <span>Tope mensual (USD)</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={value.monthlyBudgetUsd ?? 0}
+              onChange={(event) => {
+                patch({ monthlyBudgetUsd: Number(event.target.value) });
+              }}
+            />
+            <span className="hint">
+              <strong>Cero significa sin tope</strong>, no «no gastes nada»: a quien se le
+              olvida configurarlo no se le puede apagar el agente. Al alcanzarlo, las
+              conversaciones pasan a un asesor en vez de quedarse sin respuesta.
+            </span>
           </label>
         </fieldset>
 

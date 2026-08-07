@@ -20,6 +20,9 @@ export const toTenantView = (tenant: Tenant): TenantView => {
       ...(settings.businessHours ? { businessHours: settings.businessHours } : {}),
       maxConsecutiveFailedTurns: settings.maxConsecutiveFailedTurns,
       ...(settings.handoffEmail ? { handoffEmail: settings.handoffEmail } : {}),
+      ...(settings.monthlyBudgetUsd !== undefined
+        ? { monthlyBudgetUsd: settings.monthlyBudgetUsd }
+        : {}),
     },
   };
 };

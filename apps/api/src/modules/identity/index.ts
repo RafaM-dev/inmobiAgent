@@ -62,6 +62,14 @@ export interface IdentityCradle {
   setUserPassword: SetUserPasswordUseCase;
   createTenant: CreateTenantUseCase;
   updateTenantSettings: UpdateTenantSettingsUseCase;
+  /**
+   * El mismo directorio, con su caché invalidable.
+   *
+   * Está aquí porque el contenedor necesita tiparlo, pero se describe con una
+   * forma y no con la clase: `invalidate()` es una operación de `identity`
+   * sobre su propia caché, y el puerto público sigue siendo de solo lectura.
+   */
+  tenantCache: TenantDirectory & { invalidate(tenantId: string): void };
 }
 
 type Cradle = PlatformCradle & IdentityCradle;
@@ -106,10 +114,13 @@ export const identityModule: ModuleRegistration<Cradle, FastifyInstance> = {
         (c: Cradle): UserRepository => new PrismaUserRepository(c.database),
       ).singleton(),
 
-      tenantDirectory: asFunction(
-        (c: Cradle): TenantDirectory =>
+      tenantCache: asFunction(
+        (c: Cradle) =>
           new TenantDirectoryService({ tenants: c.tenantRepository, clock: c.clock }),
       ).singleton(),
+
+      // El puerto público apunta a la misma instancia, con la vista estrecha.
+      tenantDirectory: asFunction((c: Cradle): TenantDirectory => c.tenantCache).singleton(),
 
       sessionRepository: asFunction(
         (c: Cradle): SessionRepository => new PrismaSessionRepository(c.database),
@@ -148,6 +159,7 @@ export const identityModule: ModuleRegistration<Cradle, FastifyInstance> = {
             tenants: c.tenantRepository,
             unitOfWork: c.unitOfWork,
             clock: c.clock,
+            cache: c.tenantCache,
           }),
       ).singleton(),
 

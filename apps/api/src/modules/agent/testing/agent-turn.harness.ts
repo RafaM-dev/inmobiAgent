@@ -55,6 +55,7 @@ import type { AgentRun } from "../domain/entities/agent-run";
 import type { AgentRunRepository } from "../domain/repositories/agent-run.repository";
 import { RuleBasedSlotExtractor } from "../infrastructure/extraction/rule-based-slot-extractor";
 import { MockLLMProvider } from "../infrastructure/llm/mock/mock-llm-provider";
+import { InMemoryUsageLedger } from "./in-memory-usage-ledger";
 
 /**
  * Banco de pruebas del turno completo, sin base de datos y sin red.
@@ -64,6 +65,9 @@ import { MockLLMProvider } from "../infrastructure/llm/mock/mock-llm-provider";
  * Todo lo demás —políticas, presupuesto, herramientas, guardrails, proveedor
  * simulado— es el código de producción tal cual.
  */
+
+/** Instante fijo del arnés. Exportado para que los tests no lo dupliquen. */
+export const HARNESS_NOW = new Date("2026-07-01T15:00:00.000Z");
 
 export const TENANT: TenantView = {
   id: "t1",
@@ -92,6 +96,8 @@ export class FakeConversationService implements ConversationService {
    */
   readonly history: ContextMessage[] = [];
   paused: { reason: string } | undefined;
+  /** Simula un fallo al entregar: sirve para probar el camino de excepción. */
+  failOnReply = false;
   status: ConversationContext["status"] = "OPEN";
 
   constructor(private readonly missing: readonly string[] = []) {}
@@ -123,6 +129,7 @@ export class FakeConversationService implements ConversationService {
     blocks: readonly ReplyBlock[];
     authorType?: string;
   }): Promise<Result<{ messageId: string; delivered: boolean }, AppError>> {
+    if (this.failOnReply) throw new Error("el canal falló al entregar");
     this.replies.push({ blocks: command.blocks, authorType: command.authorType ?? "AGENT" });
     // La misma proyección a texto que usa el mensaje persistido: lo que el
     // agente lea en el turno siguiente es lo que el cliente vio.
@@ -194,6 +201,7 @@ export interface Harness {
   readonly leads: InMemoryLeads;
   readonly appointments: InMemoryAppointments;
   readonly knowledge: InMemoryKnowledge;
+  readonly usage: InMemoryUsageLedger;
 }
 
 export const createHarness = (options: {
@@ -201,13 +209,15 @@ export const createHarness = (options: {
   missing?: readonly string[];
   tenant?: TenantView;
   limits?: { maxIterations: number; maxToolCalls: number; timeoutMs: number };
+  /** Tope de gasto mensual en USD. `0` o ausente = sin tope. */
+  monthlyBudgetUsd?: number;
 } = {}): Harness => {
   const tokens = new HeuristicTokenCounter();
   const conversations = new FakeConversationService(options.missing ?? []);
   const runs = new InMemoryAgentRunRepository();
   const events = new RecordingEventPublisher();
   const logger = new NoopLogger();
-  const clock = new FixedClock(new Date("2026-07-01T15:00:00.000Z"));
+  const clock = new FixedClock(HARNESS_NOW);
 
   const prompts = new PromptRegistry();
   prompts.register(systemPromptV1);
@@ -240,6 +250,8 @@ export const createHarness = (options: {
   tools.register(createProposeVisitSlotsTool({ appointments: appointments.service, clock }));
   tools.register(createScheduleVisitTool({ appointments: appointments.service }));
 
+  const usage = new InMemoryUsageLedger();
+
   const runTurn = new RunAgentTurnUseCase({
     conversations,
     tenants,
@@ -260,8 +272,12 @@ export const createHarness = (options: {
     ids: new SequentialIdGenerator("run"),
     logger,
     limits: options.limits ?? { maxIterations: 6, maxToolCalls: 10, timeoutMs: 45_000 },
+    usage,
+    ...(options.monthlyBudgetUsd !== undefined
+      ? { defaultMonthlyBudgetUsd: options.monthlyBudgetUsd }
+      : {}),
     capabilitiesOf: () => Promise.resolve(defaultCapabilities({ maxTextLength: 1200 })),
   });
 
-  return { runTurn, conversations, runs, events, catalog, leads, appointments, knowledge };
+  return { runTurn, conversations, runs, events, catalog, leads, appointments, knowledge, usage };
 };

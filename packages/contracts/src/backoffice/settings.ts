@@ -34,6 +34,12 @@ export const agentSettingsSchema = z.object({
   /** Turnos seguidos con fallo antes de pasar la conversación a una persona. */
   maxConsecutiveFailedTurns: z.number().int(),
   handoffEmail: z.string().optional(),
+  /**
+   * Tope de gasto en IA por mes, en USD. Ausente = el tope del despliegue.
+   * Cero significa SIN tope, no `no gastes nada`: a quien olvidó configurarlo
+   * no se le puede apagar el agente.
+   */
+  monthlyBudgetUsd: z.number().optional(),
 });
 export type AgentSettingsContract = z.infer<typeof agentSettingsSchema>;
 
@@ -99,6 +105,28 @@ export const updateAgentSettingsRequestSchema = z
     businessHours: businessHoursSchema,
     maxConsecutiveFailedTurns: z.number().int().min(1).max(10),
     handoffEmail: z.string().email().max(200),
+    monthlyBudgetUsd: z.number().min(0).max(1_000_000),
   })
   .partial();
 export type UpdateAgentSettingsRequest = z.infer<typeof updateAgentSettingsRequestSchema>;
+
+/**
+ * Consumo del periodo en curso.
+ *
+ * Va en su propia respuesta, y no dentro de `/api/settings`, por la misma
+ * razón que los canales (D38): el contador es del módulo `agent`, que ya
+ * depende de `identity`. Meterlo ahí cerraría un ciclo entre módulos.
+ */
+export const usageSummarySchema = z.object({
+  /** `YYYY-MM` en la zona horaria de la inmobiliaria. */
+  period: z.string(),
+  spentUsd: z.number(),
+  promptTokens: z.number().int(),
+  completionTokens: z.number().int(),
+  turns: z.number().int(),
+  /** Tope vigente. `0` = sin tope. */
+  limitUsd: z.number(),
+  /** Fracción del tope consumida. `0` cuando no hay tope. */
+  ratio: z.number(),
+});
+export type UsageSummary = z.infer<typeof usageSummarySchema>;

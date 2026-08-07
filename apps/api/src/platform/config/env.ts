@@ -66,6 +66,12 @@ const envSchema = z
     LLM_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(60_000),
     LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
 
+    /* Tope de gasto en IA por inmobiliaria y mes, en USD. Es el valor por
+       defecto; cada inmobiliaria puede fijar el suyo. Cero = SIN tope, que es
+       lo correcto en modo demo (donde el gasto real es cero) y lo que evita
+       que a nadie se le apague el agente por un límite que no configuró. */
+    TENANT_MONTHLY_BUDGET_USD: z.coerce.number().min(0).max(1_000_000).default(0),
+
     /* WhatsApp Cloud API. El App Secret y el token de verificación son de la
        APP de Meta —una sola para toda la plataforma—, mientras que el token de
        acceso es de cada número y vive cifrado en su cuenta de canal. Sin estos
@@ -174,6 +180,8 @@ export interface AppConfig {
     turnTimeoutMs: number;
     turnDebounceMs: number;
     turnDebounceMaxMs: number;
+    /** Tope de gasto por inmobiliaria y mes, en USD. `0` = sin tope. */
+    monthlyBudgetUsd: number;
   };
   readonly storage: { driver: "local"; dir: string };
   readonly knowledge: { maxDocumentBytes: number };
@@ -215,6 +223,7 @@ const toAppConfig = (env: Env): AppConfig => ({
     turnTimeoutMs: env.AGENT_TURN_TIMEOUT_MS,
     turnDebounceMs: env.AGENT_TURN_DEBOUNCE_MS,
     turnDebounceMaxMs: env.AGENT_TURN_DEBOUNCE_MAX_MS,
+    monthlyBudgetUsd: env.TENANT_MONTHLY_BUDGET_USD,
   },
   whatsapp: {
     // Ambos o ninguno: con App Secret pero sin token de verificación el webhook

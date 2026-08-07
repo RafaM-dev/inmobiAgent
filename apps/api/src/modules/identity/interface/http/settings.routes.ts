@@ -64,6 +64,9 @@ const toResponse = (
     ...(tenant.settings.handoffEmail !== undefined
       ? { handoffEmail: tenant.settings.handoffEmail }
       : {}),
+    ...(tenant.settings.monthlyBudgetUsd !== undefined
+      ? { monthlyBudgetUsd: tenant.settings.monthlyBudgetUsd }
+      : {}),
   },
   runtime: {
     llmProvider: runtime.llmProvider,

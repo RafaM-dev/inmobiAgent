@@ -68,3 +68,27 @@ model AgentRunStep {
   @@index([tenantId, name])
   @@map("agent_run_steps")
 }
+
+/// Consumo acumulado por inmobiliaria y periodo de facturación.
+///
+/// Es un contador, no una vista: sumar el coste de todas las ejecuciones del
+/// mes en cada turno funciona el primer mes y se degrada sin avisar. Aquí la
+/// comprobación del tope es una lectura puntual por clave, cueste lo que cueste
+/// el histórico de `agent_runs` — que sigue siendo la traza detallada.
+model TenantUsagePeriod {
+  tenantId         String   @map("tenant_id")
+  /// `YYYY-MM` en la ZONA HORARIA de la inmobiliaria, no en UTC: el corte del
+  /// mes tiene que caer donde para ella es medianoche.
+  period           String
+  promptTokens     BigInt   @default(0) @map("prompt_tokens")
+  completionTokens BigInt   @default(0) @map("completion_tokens")
+  /// Coste estimado acumulado en USD.
+  spentUsd         Decimal  @default(0) @map("spent_usd") @db.Decimal(14, 6)
+  turns            Int      @default(0)
+
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@id([tenantId, period])
+  @@map("tenant_usage_periods")
+}

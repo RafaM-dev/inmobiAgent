@@ -759,3 +759,40 @@ textarea {
   border-radius: 6px;
   background: var(--surface);
 }
+
+/* ------------------------------------------------------------ Gasto en IA -- */
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage__figures {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage__figures strong {
+  font-size: 22px;
+}
+
+.usage__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.usage__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+/* A partir del 80 % la barra cambia de color: es el mismo umbral en el que la
+   política empieza a avisar, así que la pantalla y el servidor no discrepan. */
+.usage__fill.is-warning {
+  background: var(--warm);
+}

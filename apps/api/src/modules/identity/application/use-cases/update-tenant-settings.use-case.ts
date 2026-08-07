@@ -28,6 +28,15 @@ export class UpdateTenantSettingsUseCase {
       tenants: TenantRepository;
       unitOfWork: UnitOfWork;
       clock: Clock;
+      /**
+       * Caché del directorio de tenants.
+       *
+       * Sin esto, un cambio guardado desde el panel tarda hasta el TTL de la
+       * caché en aplicarse: bajar el tope de gasto o cambiar el tono parecía
+       * no hacer nada durante medio minuto. Lo destapó el tope de gasto de F9,
+       * pero el fallo estaba desde que existe la pantalla.
+       */
+      cache: { invalidate(tenantId: string): void };
     },
   ) {}
 
@@ -44,6 +53,10 @@ export class UpdateTenantSettingsUseCase {
     await this.deps.unitOfWork.run(async () => {
       await this.deps.tenants.save(tenant);
     });
+
+    // Después del commit: invalidar antes dejaría una ventana en la que otra
+    // petición recarga la caché con el valor viejo y lo deja fijado otro TTL.
+    this.deps.cache.invalidate(tenantId);
 
     return ok(toTenantView(tenant));
   }

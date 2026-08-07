@@ -19,17 +19,24 @@ import {
   type ConversationService,
   type ProfileSlots,
 } from "../../../conversation";
-import type { TenantDirectory } from "../../../identity";
+import type { TenantDirectory, TenantView } from "../../../identity";
 import { AgentRun } from "../../domain/entities/agent-run";
 import { planDiscovery } from "../../domain/policies/discovery.policy";
 import { decideEscalation, type HandoffReason } from "../../domain/policies/escalation.policy";
+import {
+  billingPeriodOf,
+  decideSpend,
+  SpendVerdict,
+  type SpendDecision,
+} from "../../domain/policies/spend-limit.policy";
+import type { UsageLedger } from "../ports/usage-ledger";
 import { AgentStepType } from "../../domain/value-objects/agent-step";
 import { classifyIntent, Intent } from "../../domain/value-objects/intent";
 import { TurnBudget, type TurnBudgetLimits } from "../../domain/value-objects/turn-budget";
 import { AgentRunCompleted, AgentRunFailed } from "../events/agent.events";
 import { evaluateGuardrails, type Guardrail } from "../guardrails/guardrail";
 import type { AgentRunRepository } from "../../domain/repositories/agent-run.repository";
-import type { LLMProvider, LlmMessage } from "../ports/llm-provider";
+import type { LLMProvider, LlmMessage, LlmUsage } from "../ports/llm-provider";
 import type { SlotExtractor } from "../ports/slot-extractor";
 import type { ContextBuilder } from "../runtime/context-builder";
 import type { ToolRegistry } from "../runtime/tool-registry";
@@ -113,6 +120,10 @@ export class RunAgentTurnUseCase {
       ids: IdGenerator;
       logger: Logger;
       limits: TurnBudgetLimits;
+      /** Contador de gasto por inmobiliaria. Protege la factura. */
+      usage: UsageLedger;
+      /** Tope mensual por defecto en USD. `0` o ausente = sin tope. */
+      defaultMonthlyBudgetUsd?: number;
       /**
        * Capacidades del canal por el que va la conversación. Se consultan por
        * conversación y no se fijan aquí: el mismo agente atiende una terminal
@@ -172,13 +183,22 @@ export class RunAgentTurnUseCase {
       const intent = classifyIntent(command.text);
       context = await this.rememberInferredSlots(command, context, intent, run);
 
+      /*
+       * Tope de gasto del mes. Se comprueba ANTES de llamar al modelo, que es
+       * el único momento en el que sirve de algo, y agotarlo NO deja al cliente
+       * sin respuesta: pasa la conversación a una persona. Un agente que se
+       * queda mudo porque su inmobiliaria se pasó del presupuesto parece un
+       * producto roto; uno que dice "te paso con un asesor" parece un producto.
+       */
+      const spend = await this.checkSpendLimit(tenant, startedAt);
+
       const preEscalation = decideEscalation({
         intent,
         consecutiveFailedTurns: 0,
         maxConsecutiveFailedTurns: tenant.settings.maxConsecutiveFailedTurns,
         providerFailed: false,
         guardrailBlocked: false,
-        budgetExhausted: false,
+        budgetExhausted: spend.verdict === SpendVerdict.BLOCK,
       });
 
       if (preEscalation.escalate && preEscalation.reason) {
@@ -394,6 +414,15 @@ export class RunAgentTurnUseCase {
         reason,
       });
       throw error;
+    } finally {
+      /*
+       * Un único sitio para anotar el gasto, y por eso va en el `finally`: el
+       * turno puede terminar completado, escalado o reventado, y en los tres
+       * casos ya se llamó al modelo y ya se pagó. Anotarlo solo en el camino
+       * feliz dejaría fuera justo los turnos que más se repiten cuando algo va
+       * mal — que son los que disparan una factura.
+       */
+      await this.recordSpend(tenant, startedAt, run.usage);
     }
   }
 
@@ -404,6 +433,74 @@ export class RunAgentTurnUseCase {
    * `inferred`: si el modelo luego confirma lo mismo por la herramienta, su
    * valor `user` gana y el perfil queda con la procedencia correcta.
    */
+  /**
+   * Gasto del periodo frente al tope de la inmobiliaria.
+   *
+   * El tope propio de la inmobiliaria manda sobre el global; sin ninguno de los
+   * dos no hay tope, y eso es deliberado (ver `spend-limit.policy`).
+   *
+   * Si el contador falla —la base tose, la tabla no está migrada— se DEJA
+   * PASAR el turno y se registra el fallo. Es una decisión consciente: quedarse
+   * sin atender a los clientes de todas las inmobiliarias porque no se pudo
+   * leer un contador es un daño mayor que un rato sin tope.
+   */
+  private async checkSpendLimit(
+    tenant: TenantView,
+    now: Date,
+  ): Promise<SpendDecision> {
+    const limitUsd = tenant.settings.monthlyBudgetUsd ?? this.deps.defaultMonthlyBudgetUsd ?? 0;
+    const period = billingPeriodOf(now, tenant.timezone);
+
+    let spentUsd = 0;
+    try {
+      spentUsd = (await this.deps.usage.spendIn(period)).spentUsd;
+    } catch (error) {
+      this.deps.logger.error("No se pudo leer el consumo: el turno sigue sin tope", {
+        tenantId: tenant.id,
+        period,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      return { verdict: SpendVerdict.ALLOW, ratio: 0, spentUsd: 0, limitUsd };
+    }
+
+    const decision = decideSpend({ spentUsd, limitUsd });
+
+    if (decision.verdict !== SpendVerdict.ALLOW) {
+      this.deps.logger.warn("La inmobiliaria está en su tope de gasto", {
+        tenantId: tenant.id,
+        period,
+        verdict: decision.verdict,
+        spentUsd: decision.spentUsd,
+        limitUsd: decision.limitUsd,
+      });
+    }
+
+    return decision;
+  }
+
+  /**
+   * Anota lo gastado en el turno.
+   *
+   * No se reserva presupuesto por adelantado: un turno puede pasar el tope por
+   * lo que gaste él mismo, y está bien — el tope acota el mes, no el turno.
+   * Para acotar el turno ya está `TurnBudget`.
+   *
+   * Un fallo aquí no puede tumbar una respuesta que el cliente ya ha recibido:
+   * se registra y se sigue.
+   */
+  private async recordSpend(tenant: TenantView, now: Date, usage: LlmUsage): Promise<void> {
+    if (usage.promptTokens === 0 && usage.completionTokens === 0) return;
+
+    try {
+      await this.deps.usage.record({ period: billingPeriodOf(now, tenant.timezone), usage });
+    } catch (error) {
+      this.deps.logger.error("No se pudo anotar el consumo del turno", {
+        tenantId: tenant.id,
+        err: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private async rememberInferredSlots(
     command: RunAgentTurnCommand,
     context: ConversationContext,

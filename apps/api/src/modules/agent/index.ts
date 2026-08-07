@@ -1,4 +1,5 @@
 import { asFunction, type AwilixContainer } from "awilix";
+import type { FastifyInstance } from "fastify";
 import type { ModuleRegistration } from "../../platform/di/app-module";
 import type { PlatformCradle } from "../../platform/di/platform-cradle";
 import type { EventSubscription } from "../../platform/events/event";
@@ -7,7 +8,7 @@ import type { AppointmentsCradle } from "../appointments";
 import { defaultCapabilities, type ChannelsCradle } from "../channels";
 import type { CatalogCradle } from "../catalog";
 import type { ConversationCradle } from "../conversation";
-import type { IdentityCradle } from "../identity";
+import { requireSession, type IdentityCradle } from "../identity";
 import type { KnowledgeCradle } from "../knowledge";
 import type { LeadsCradle } from "../leads";
 import { onTurnReady } from "./application/event-handlers/on-turn-ready";
@@ -24,6 +25,7 @@ import {
   type TokenCounter,
 } from "./application/ports/llm-provider";
 import type { SlotExtractor } from "./application/ports/slot-extractor";
+import type { UsageLedger } from "./application/ports/usage-ledger";
 import { PromptRegistry } from "./application/prompts/prompt-registry";
 import { systemPromptV1 } from "./application/prompts/system-prompt.v1";
 import { ContextBuilder } from "./application/runtime/context-builder";
@@ -43,13 +45,16 @@ import {
   createProposeVisitSlotsTool,
   createScheduleVisitTool,
 } from "./application/tools/visit-scheduling.tools";
+import { GetUsageSummaryUseCase } from "./application/use-cases/get-usage-summary.use-case";
 import { RunAgentTurnUseCase } from "./application/use-cases/run-agent-turn.use-case";
+import { registerUsageRoutes } from "./interface/http/usage.routes";
 import type { AgentRunRepository } from "./domain/repositories/agent-run.repository";
 import { RuleBasedSlotExtractor } from "./infrastructure/extraction/rule-based-slot-extractor";
 import { AnthropicLLMProvider } from "./infrastructure/llm/anthropic/anthropic-llm-provider";
 import { MockLLMProvider } from "./infrastructure/llm/mock/mock-llm-provider";
 import { OpenAiCompatibleLLMProvider } from "./infrastructure/llm/openai/openai-llm-provider";
 import { PrismaAgentRunRepository } from "./infrastructure/persistence/prisma/prisma-agent-run.repository";
+import { PrismaUsageLedger } from "./infrastructure/persistence/prisma/prisma-usage-ledger";
 
 /* ========================================================================== *
  * CONTRATO PÚBLICO DEL MÓDULO `agent`
@@ -78,6 +83,8 @@ export interface AgentCradle {
   agentGuardrails: readonly Guardrail[];
   handoffCoordinator: HandoffCoordinator;
   agentRunRepository: AgentRunRepository;
+  usageLedger: UsageLedger;
+  getUsageSummary: GetUsageSummaryUseCase;
   runAgentTurn: RunAgentTurnUseCase;
 }
 
@@ -91,8 +98,18 @@ type Cradle = PlatformCradle &
   KnowledgeCradle &
   AgentCradle;
 
-export const agentModule: ModuleRegistration<Cradle> = {
+export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
   name: "agent",
+
+  registerRoutes(app: FastifyInstance, cradle: Cradle): void {
+    registerUsageRoutes(app, {
+      getUsage: cradle.getUsageSummary,
+      requireSession: requireSession({
+        sessions: cradle.sessionService,
+        isProduction: cradle.config.isProduction,
+      }),
+    });
+  },
 
   registerDependencies(container: AwilixContainer<Cradle>): void {
     container.register({
@@ -255,6 +272,20 @@ export const agentModule: ModuleRegistration<Cradle> = {
         (c: Cradle): AgentRunRepository => new PrismaAgentRunRepository(c.database, c.ids),
       ).singleton(),
 
+      usageLedger: asFunction(
+        (c: Cradle): UsageLedger => new PrismaUsageLedger(c.database),
+      ).singleton(),
+
+      getUsageSummary: asFunction(
+        (c: Cradle) =>
+          new GetUsageSummaryUseCase({
+            usage: c.usageLedger,
+            tenants: c.tenantDirectory,
+            clock: c.clock,
+            defaultMonthlyBudgetUsd: c.config.agent.monthlyBudgetUsd,
+          }),
+      ).singleton(),
+
       runAgentTurn: asFunction(
         (c: Cradle) =>
           new RunAgentTurnUseCase({
@@ -276,6 +307,8 @@ export const agentModule: ModuleRegistration<Cradle> = {
               maxToolCalls: c.config.agent.maxToolCalls,
               timeoutMs: c.config.agent.turnTimeoutMs,
             },
+            usage: c.usageLedger,
+            defaultMonthlyBudgetUsd: c.config.agent.monthlyBudgetUsd,
             capabilitiesOf: async (channelAccountId: string) => {
               const found = await c.getChannelCapabilities.execute(channelAccountId);
               // Si la cuenta desapareció, se asume el canal más pobre posible:

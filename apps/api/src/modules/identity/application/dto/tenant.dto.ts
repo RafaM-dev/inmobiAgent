@@ -21,6 +21,7 @@ export const tenantSettingsInputSchema = z.object({
     .optional(),
   maxConsecutiveFailedTurns: z.number().int().min(1).max(10).optional(),
   handoffEmail: z.string().email().optional(),
+  monthlyBudgetUsd: z.number().min(0).max(1_000_000).optional(),
 });
 
 export const createTenantInputSchema = z.object({
@@ -63,5 +64,7 @@ export interface TenantView {
     readonly businessHours?: BusinessHours;
     readonly maxConsecutiveFailedTurns: number;
     readonly handoffEmail?: string;
+    /** Tope de gasto en IA por mes, en USD. Ausente = el tope del despliegue. */
+    readonly monthlyBudgetUsd?: number;
   };
 }

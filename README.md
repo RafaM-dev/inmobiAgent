@@ -160,7 +160,7 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-436 tests unitarios con dobles en memoria, y 33 de integración contra Postgres
+452 tests unitarios con dobles en memoria, y 39 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -188,7 +188,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: rate limiting por tenant, control de coste, OpenTelemetry, RLS | Siguiente |
+| F9 | Producción: control de coste por inmobiliaria ✅ · rate limiting, OpenTelemetry, RLS | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

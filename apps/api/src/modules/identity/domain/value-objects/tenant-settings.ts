@@ -29,6 +29,11 @@ export interface TenantSettingsProps {
   readonly maxConsecutiveFailedTurns: number;
   /** Correo del buzón de asesores para avisos de escalamiento. */
   readonly handoffEmail: string | undefined;
+  /**
+   * Tope de gasto en IA por mes, en USD. `undefined` = el tope global del
+   * despliegue. Cero o negativo = sin tope (ver `spend-limit.policy`).
+   */
+  readonly monthlyBudgetUsd: number | undefined;
 }
 
 /**
@@ -91,6 +96,7 @@ export class TenantSettings {
       businessHours,
       maxConsecutiveFailedTurns,
       handoffEmail: cleanOptional(input.handoffEmail),
+      monthlyBudgetUsd: input.monthlyBudgetUsd,
     });
   }
 
@@ -111,6 +117,9 @@ export class TenantSettings {
   }
   get handoffEmail(): string | undefined {
     return this.props.handoffEmail;
+  }
+  get monthlyBudgetUsd(): number | undefined {
+    return this.props.monthlyBudgetUsd;
   }
 
   with(changes: TenantSettingsInput): TenantSettings {

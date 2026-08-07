@@ -28,16 +28,23 @@ const setup = () => {
   });
   tenants.items.set(tenant.id, tenant);
 
+  const invalidated: string[] = [];
+
   const useCase = new UpdateTenantSettingsUseCase({
     tenants,
     unitOfWork: new NoopUnitOfWork(),
     clock: new FixedClock(NOW),
+    cache: {
+      invalidate: (tenantId) => {
+        invalidated.push(tenantId);
+      },
+    },
   });
 
   const run = <T>(fn: () => Promise<T>, tenantId = "tenant-1"): Promise<T> =>
     TenantContext.run({ tenantId, correlationId: "corr-1", source: "http" }, fn);
 
-  return { useCase, tenants, tenant, run };
+  return { useCase, tenants, tenant, run, invalidated };
 };
 
 describe("UpdateTenantSettingsUseCase", () => {
@@ -78,6 +85,28 @@ describe("UpdateTenantSettingsUseCase", () => {
     ).rejects.toThrow(/HH:mm/);
 
     expect(tenants.items.get("tenant-1")?.settings.businessHours?.from).toBe("09:00");
+  });
+
+  it("invalida la caché del directorio al guardar", async () => {
+    const { useCase, run, invalidated } = setup();
+
+    await run(() => useCase.execute({ tone: AgentTone.FORMAL }));
+
+    /*
+     * Sin esto, un cambio guardado desde el panel tarda hasta el TTL de la
+     * caché en aplicarse: bajar el tope de gasto o cambiar el tono parecía no
+     * hacer nada durante medio minuto. El `invalidate()` existía desde F1 y
+     * nadie lo llamaba.
+     */
+    expect(invalidated).toEqual(["tenant-1"]);
+  });
+
+  it("no invalida nada si el guardado falló", async () => {
+    const { useCase, run, invalidated } = setup();
+
+    await run(() => useCase.execute({ tone: AgentTone.NEUTRO }), "tenant-ajeno");
+
+    expect(invalidated).toEqual([]);
   });
 
   it("permite borrar un ajuste opcional enviándolo vacío", async () => {

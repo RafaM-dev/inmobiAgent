@@ -9,6 +9,7 @@ import {
   leadListResponseSchema,
   sessionResponseSchema,
   settingsResponseSchema,
+  usageSummarySchema,
   type AppointmentListResponse,
   type ChannelAccountListResponse,
   type ConversationDetail,
@@ -23,6 +24,7 @@ import {
   type SessionResponse,
   type SettingsResponse,
   type UpdateAgentSettingsRequest,
+  type UsageSummary,
 } from "@agentinmobi/contracts";
 import { request, requestVoid } from "./client";
 
@@ -106,4 +108,6 @@ export const api = {
 
   channelAccounts: (): Promise<ChannelAccountListResponse> =>
     request("/api/channels/accounts", channelAccountListResponseSchema),
+
+  usage: (): Promise<UsageSummary> => request("/api/usage", usageSummarySchema),
 };
