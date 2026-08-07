@@ -139,6 +139,36 @@ describe("Política de troceado", () => {
     expect(chunk(texto)).toEqual(chunk(texto));
   });
 
+  it("reconoce el epígrafe pegado a su párrafo, sin línea en blanco", () => {
+    /*
+     * Es la forma en que la gente escribe Markdown de verdad. Sin línea en
+     * blanco por medio, el título y su párrafo son UN bloque: comprobar el
+     * bloque entero contra `^#…$` no casaba nunca, el epígrafe se perdía y el
+     * documento acababa en un solo fragmento sin contexto — justo lo contrario
+     * de lo que D24 exige. Lo destapó un test de integración con Postgres.
+     */
+    const pegado = "## Mascotas\nSe admiten mascotas pequeñas.\n\n## Parqueadero\nUno por unidad.";
+    const separado =
+      "## Mascotas\n\nSe admiten mascotas pequeñas.\n\n## Parqueadero\n\nUno por unidad.";
+
+    // Las dos formas son Markdown válido y deben producir lo mismo.
+    expect(chunk(pegado)).toEqual(chunk(separado));
+
+    const chunks = chunk(pegado);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.heading).toBe("Mascotas");
+    expect(chunks[1]?.heading).toBe("Parqueadero");
+    // El epígrafe no es contenido: no se cita como si el cliente lo hubiera leído.
+    expect(chunks[0]?.content).not.toContain("##");
+  });
+
+  it("varios epígrafes seguidos sin texto entre ellos dejan el último", () => {
+    const chunks = chunk("# Reglamento\n## Mascotas\nSe admiten mascotas pequeñas.");
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.heading).toBe("Mascotas");
+  });
+
   it("los ordinales son consecutivos desde cero", () => {
     const texto = Array.from({ length: 10 }, (_, i) => paragraph(`p${String(i)}`, 50)).join("\n\n");
 

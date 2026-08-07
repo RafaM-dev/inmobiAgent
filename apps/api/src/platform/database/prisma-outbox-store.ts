@@ -18,10 +18,21 @@ interface OutboxRow {
 }
 
 /**
+ * Cuánto deja de ser visible un evento reservado.
+ *
+ * Tiene que superar lo que tarda el relay en procesar un lote entero. Si se
+ * queda corto, otra réplica lo recoge mientras el primero aún trabaja; si se
+ * pasa, un worker muerto retrasa sus eventos ese tiempo. Un minuto cubre con
+ * holgura un lote de 50 y mantiene la recuperación rápida.
+ */
+const VISIBILITY_TIMEOUT_MS = 60_000;
+
+/**
  * Implementación del outbox sobre PostgreSQL.
  *
- * `reserveBatch` usa `FOR UPDATE SKIP LOCKED`: varias réplicas del worker
- * pueden competir por el mismo outbox sin duplicar entregas ni bloquearse.
+ * `reserveBatch` combina `FOR UPDATE SKIP LOCKED` —para que dos réplicas que
+ * sondean a la vez no se peleen por las mismas filas— con un plazo de
+ * invisibilidad, que es lo que de verdad reserva el lote mientras se entrega.
  * Prisma no expone SKIP LOCKED, así que esta consulta es SQL crudo a propósito.
  */
 export class PrismaOutboxStore implements OutboxStore {
@@ -44,6 +55,27 @@ export class PrismaOutboxStore implements OutboxStore {
   }
 
   async reserveBatch(limit: number, now: Date): Promise<OutboxRecord[]> {
+    /*
+     * La reserva EMPUJA `available_at` hacia adelante, no solo incrementa los
+     * intentos.
+     *
+     * `FOR UPDATE SKIP LOCKED` solo sostiene el bloqueo mientras dura la
+     * sentencia. En cuanto termina, las filas vuelven a ser visibles — y el
+     * relay tarda mucho más que eso: reserva un lote y luego entrega los
+     * eventos uno a uno, ejecutando manejadores por medio. Sin este empujón,
+     * una segunda réplica que sondeara durante ese rato se llevaría el MISMO
+     * lote y lo entregaría otra vez. Lo destapó un test de integración que
+     * pedía dos lotes seguidos y recibía los mismos tres eventos.
+     *
+     * El sistema no llegaba a ejecutar el manejador dos veces —la idempotencia
+     * del bus lo impide— pero el trabajo se duplicaba y la promesa de "varias
+     * réplicas sin duplicar entregas" no era cierta.
+     *
+     * Si el worker muere a mitad, los eventos vuelven a estar disponibles
+     * pasado el plazo. Es un aplazamiento, nunca una pérdida.
+     */
+    const visibleAgainAt = new Date(now.getTime() + VISIBILITY_TIMEOUT_MS);
+
     const rows = await this.db.raw().$queryRaw<OutboxRow[]>`
       WITH reserved AS (
         SELECT id
@@ -54,7 +86,8 @@ export class PrismaOutboxStore implements OutboxStore {
         FOR UPDATE SKIP LOCKED
       )
       UPDATE outbox_events o
-      SET attempts = o.attempts + 1
+      SET attempts = o.attempts + 1,
+          available_at = ${visibleAgainAt}
       FROM reserved r
       WHERE o.id = r.id
       RETURNING o.id, o.event_id, o.type, o.version, o.tenant_id, o.occurred_at,

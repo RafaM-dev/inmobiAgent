@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
+    // Solo `src/`. La suite de integración vive en `test/` con su propia
+    // configuración: necesita Postgres levantado, y `pnpm test` tiene que
+    // funcionar en un clon recién hecho.
     include: ["src/**/*.{test,spec}.ts"],
     coverage: {
       provider: "v8",

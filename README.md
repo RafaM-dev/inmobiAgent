@@ -112,9 +112,11 @@ OPENAI_API_KEY=sk-...
 | `pnpm dev` | API + worker + back-office, con recarga |
 | `pnpm dev:api` / `dev:web` | Solo uno de los dos |
 | `pnpm chat` | Cliente de chat por terminal (canal `console`) |
-| `pnpm verify` | typecheck + lint + reglas de arquitectura + tests |
+| `pnpm verify` | typecheck + lint + reglas de arquitectura + tests unitarios |
+| `pnpm verify:full` | Lo anterior **más los tests de integración**. Es lo que debe correr CI |
 | `pnpm arch:check` | Verifica las fronteras entre capas y módulos |
-| `pnpm test` | Tests |
+| `pnpm test` | Tests unitarios. No necesita infraestructura |
+| `pnpm test:integration` | Postgres real: crea la base `…_test`, migra y ejecuta |
 | `pnpm infra:up` / `infra:down` | Postgres (pgvector) y Mailpit |
 | `pnpm db:migrate` | Migraciones de Prisma |
 | `pnpm db:seed` | Inmobiliaria de demostración, su canal y su documentación |
@@ -150,6 +152,23 @@ docs/           Arquitectura y decisiones
 - introduce una dependencia circular.
 
 No son convenciones de equipo: son reglas ejecutables.
+
+## Qué se prueba, y contra qué
+
+416 tests unitarios con dobles en memoria, y 33 de integración contra Postgres
+de verdad y la aplicación entera montada. La separación importa: `pnpm test`
+funciona en un clon recién hecho, `pnpm test:integration` exige la base
+levantada.
+
+Los de integración cubren lo que ningún doble puede imitar honestamente: que el
+filtro por inmobiliaria esté de verdad en el SQL, el `unaccent` y el lematizador
+español de Postgres, el `SKIP LOCKED` del outbox, y el HTTP real con su guardia
+de sesión y su manejador de errores.
+
+Las tres primeras suites que se escribieron encontraron tres defectos en código
+que llevaba fases dando por bueno: un `findById` sin ámbito de tenant, una
+reserva del outbox que no reservaba nada más allá de la sentencia, y un troceado
+que no reconocía los epígrafes de Markdown pegados a su párrafo.
 
 ## Estado
 

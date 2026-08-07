@@ -684,9 +684,38 @@ Se construye el canal **console/web antes que WhatsApp** a propósito: obliga a 
 | Unit | Entidades, VOs, políticas (puras) | Vitest |
 | Use case | Casos de uso con adaptadores in-memory | Vitest |
 | **Contract** | **Una misma suite corre contra Mock y contra el adaptador real de cada puerto** (`LLMProvider`, `PropertyService`, `VectorStore`, `ChatChannel`) | Vitest |
-| Integración | Repos Prisma contra Postgres real | Testcontainers |
+| **Integración** | **Repositorios Prisma y rutas HTTP contra Postgres real y la aplicación entera montada** | **Vitest + Postgres del `docker compose`, base `…_test` (D41)** |
 | E2E conversacional | Guiones: "cliente busca apto en Medellín" → aserciones sobre estado final (lead creado, cita agendada) | Vitest + canal `console` |
 | Regresión de agente | `ReplayAgentRun` sobre fixtures grabados | Vitest |
+
+### Dos suites, dos requisitos
+
+```bash
+pnpm test              # unitaria: sin infraestructura, funciona en un clon recién hecho
+pnpm test:integration  # Postgres real: crea la base `…_test`, migra y ejecuta
+pnpm verify:full       # typecheck + lint + arquitectura + las dos suites
+```
+
+Están separadas porque tienen coste y requisitos distintos, y mezclarlas
+volvería lento el bucle de trabajo. **CI debe correr `verify:full`**: una
+verificación que se salta la capa que habla con la base de datos da una
+confianza que no ha ganado.
+
+Lo que la integración cubre y lo unitario no puede:
+
+- El `WHERE tenant_id = …` está de verdad en el SQL, no solo en un doble que
+  escribimos nosotros. Un fallo aquí es una fuga entre clientes.
+- `unaccent`, el lematizador español y las palabras vacías de Postgres:
+  "comisión" y "comision" son la misma palabra, "requisitos" encuentra
+  "requisito", y "del" no hace coincidir documentos ajenos.
+- `FOR UPDATE SKIP LOCKED` y la reserva del outbox con varias réplicas.
+- El HTTP real: los mismos plugins, el mismo guardia de sesión y el mismo
+  manejador de errores que se despliegan, servidos con `inject()` en vez de por
+  un socket.
+
+Las tres primeras suites de integración escritas encontraron tres defectos
+reales en código que llevaba fases dando por bueno: D42, D43 y un `findById`
+sin ámbito de tenant. Ninguno era visible desde un doble en memoria.
 
 ---
 
@@ -770,6 +799,9 @@ Pasar a producción = cambiar variables de entorno. Ni un import distinto en el 
 | D38 | **Los canales viajan en su propia respuesta, no dentro de `/api/settings`.** Son del módulo `channels`, que ya depende de `identity`; meterlos en la respuesta de configuración obligaría a `identity` a conocer `channels` y cerraría un ciclo entre módulos. Dos peticiones desde el navegador son gratis; un ciclo en el grafo es el primer paso para que un monolito modular deje de serlo. La proyección además excluye `config`, donde viven las credenciales cifradas: reutilizar la vista que reciben los adaptadores habría sacado secretos del servidor por ahorrar un tipo. | ✅ Cerrada | 2026-08-07 |
 | D39 | **El simulador habla por la ruta pública del canal, no por una interna.** El navegador pregunta cuál es la cuenta de consola de su inmobiliaria y después le escribe por la misma URL que usaría un cliente final: mismo caso de uso, mismo agente, misma conversación persistida, que aparece en el inbox como cualquier otra. Un simulador con su propio atajo probaría un camino que nadie usa y fallaría justo el día que hace falta. "Empezar de nuevo" no borra nada: genera un remitente nuevo. | ✅ Cerrada | 2026-08-07 |
 | D40 | **El número de documentos de una colección se cuenta, no se guarda.** El campo `documentCount` existía desde F5 y valía cero siempre; la pantalla lo destapó mostrando "Políticas (0)" con tres documentos dentro. Se elimina del dominio y se calcula con un `GROUP BY` en la lectura. Un contador denormalizado se desincroniza en cuanto un borrado falla a medias, y el síntoma —"(7)" con cuatro documentos— hace dudar de todo lo demás que muestra la pantalla. | ✅ Cerrada | 2026-08-07 |
+| D41 | **La suite de integración usa el Postgres del `docker compose`, en una base aparte, no Testcontainers.** Lo que hace falta probar —HNSW, `ts_rank`, `unaccent`, `SKIP LOCKED`— es exactamente lo que ningún doble imita, y el proyecto ya levanta ese Postgres. Un contenedor propio por ejecución añadiría medio minuto de arranque para obtener la misma base. Se usa `…_test` y las MIGRACIONES reales, no `db push`: un esquema empujado desde el modelo se parece al de producción pero no es el mismo. `pnpm test` sigue sin necesitar infraestructura; `pnpm verify:full` la exige. | ✅ Cerrada | 2026-08-07 |
+| D42 | **`reserveBatch` empuja `available_at` hacia adelante; `SKIP LOCKED` no bastaba.** El bloqueo de `FOR UPDATE SKIP LOCKED` muere con la sentencia, y el relay tarda mucho más: reserva un lote y entrega los eventos uno a uno ejecutando manejadores. Una segunda réplica que sondeara durante ese rato se llevaba el MISMO lote. No llegaba a ejecutarse un manejador dos veces —la idempotencia del bus lo impedía— pero el trabajo se duplicaba y la promesa de "varias réplicas sin duplicar entregas" era falsa. Ahora la reserva incluye un plazo de invisibilidad de 60 s: si el worker muere, los eventos vuelven pasado el plazo. Es un aplazamiento, nunca una pérdida. | ✅ Cerrada | 2026-08-07 |
+| D43 | **El epígrafe se despega del principio del bloque, no se busca en el bloque entero.** En Markdown escrito por personas el título va pegado a su párrafo, sin línea en blanco: las dos líneas son un solo bloque y `^#…$` no casaba nunca. El epígrafe se perdía y la sección no abría fragmento, así que un reglamento entero acababa en un trozo sin contexto — lo contrario de lo que D24 exige. Sobrevivió a F5 porque los documentos del seed sí dejan la línea en blanco; lo destapó el primer test contra Postgres. **Los documentos indexados antes de este arreglo hay que reindexarlos.** | ✅ Cerrada | 2026-08-07 |
 
 ## 18. Decisiones abiertas
 

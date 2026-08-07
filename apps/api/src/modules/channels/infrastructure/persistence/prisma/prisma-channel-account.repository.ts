@@ -1,7 +1,7 @@
 import type { ChannelAccount as PrismaChannelAccount } from "../../../../../generated/prisma/client";
 import type { Database } from "../../../../../platform/database/prisma";
 import { toJson } from "../../../../../platform/database/json";
-import { assertWritableTenant } from "../../../../../platform/database/tenant-scope";
+import { assertWritableTenant, tenantScope } from "../../../../../platform/database/tenant-scope";
 import { ChannelAccount } from "../../../domain/entities/channel-account";
 import type { ChannelAccountRepository } from "../../../domain/repositories/channel-account.repository";
 import type { ChannelType } from "../../../domain/value-objects/channel-type";
@@ -22,8 +22,20 @@ const toDomain = (row: PrismaChannelAccount): ChannelAccount =>
 export class PrismaChannelAccountRepository implements ChannelAccountRepository {
   constructor(private readonly db: Database) {}
 
+  /**
+   * Acotada por tenant, como todas las lecturas por id del sistema.
+   *
+   * Estaba sin acotar y lo destapó un test de integración. No era explotable
+   * —sus dos llamadores pasan un id que sale del estado interno, no de una
+   * petición— pero rompía la garantía en la que se apoya el resto: que ningún
+   * repositorio devuelve datos de otra inmobiliaria aunque le den su id. Una
+   * defensa en profundidad con un agujero no es defensa en profundidad; es
+   * suerte.
+   */
   async findById(id: string): Promise<ChannelAccount | null> {
-    const row = await this.db.client().channelAccount.findUnique({ where: { id } });
+    const row = await this.db.client().channelAccount.findFirst({
+      where: { ...tenantScope(), id },
+    });
     return row ? toDomain(row) : null;
   }
 

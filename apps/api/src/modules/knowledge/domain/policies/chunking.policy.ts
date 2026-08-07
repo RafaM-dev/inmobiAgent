@@ -69,14 +69,41 @@ const toUnits = (text: string, counter: TokenCounter, target: number): Unit[] =>
     .map((block) => block.trim())
     .filter((block) => block.length > 0);
 
-  for (const block of blocks) {
-    const match = HEADING.exec(block);
-    if (match?.[1]) {
+  for (const rawBlock of blocks) {
+    /*
+     * Los encabezados se despegan del principio del bloque, no se buscan en el
+     * bloque entero.
+     *
+     * En Markdown escrito por personas el título va pegado a su párrafo:
+     *
+     *     ## Mascotas
+     *     Se permiten mascotas de hasta quince kilos…
+     *
+     * Sin línea en blanco por medio, las dos líneas son UN bloque. Comprobar el
+     * bloque completo contra `^#…$` no casa nunca, así que el encabezado se
+     * perdía y —peor— la sección no abría fragmento: un reglamento entero
+     * acababa en un solo trozo sin epígrafe, que es exactamente lo que D24
+     * existe para evitar. Lo encontró un test de integración; el bug había
+     * sobrevivido a F5 porque los documentos del seed sí dejan la línea en
+     * blanco.
+     */
+    let block = rawBlock;
+    for (;;) {
+      const newline = block.indexOf("\n");
+      const firstLine = (newline === -1 ? block : block.slice(0, newline)).trim();
+
+      const match = HEADING.exec(firstLine);
+      if (!match?.[1]) break;
+
       // Un encabezado no es contenido: cambia el contexto de lo que viene.
       heading = match[1].trim();
       pendingSection = true;
-      continue;
+
+      block = newline === -1 ? "" : block.slice(newline + 1).trim();
+      if (block.length === 0) break;
     }
+
+    if (block.length === 0) continue;
 
     const tokens = counter.count(block);
     if (tokens <= target) {

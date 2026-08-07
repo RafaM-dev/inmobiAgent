@@ -13,6 +13,16 @@ export interface ApplicationOptions {
   /** `api` sirve HTTP; `worker` procesa outbox y jobs; `all` hace ambos. */
   role?: AppRole;
   modules?: readonly AppModule[];
+  /**
+   * `false` construye el servidor pero NO abre el socket.
+   *
+   * Existe para los tests de integración: se ejercita el HTTP real —los mismos
+   * plugins, el mismo guardia de sesión, el mismo manejador de errores— con
+   * `app.inject()`, sin puertos que colisionen entre ficheros de test que corren
+   * en paralelo. Probar contra un Fastify montado a mano en el test no
+   * demostraría nada sobre el que arranca en producción.
+   */
+  listen?: boolean;
 }
 
 /**
@@ -39,6 +49,11 @@ export class Application {
 
   get cradle(): AppCradle {
     return this.container.cradle;
+  }
+
+  /** Servidor HTTP ya montado. `undefined` si el rol no sirve HTTP. */
+  get httpServer(): FastifyInstance | undefined {
+    return this.server;
   }
 
   async start(): Promise<void> {
@@ -84,10 +99,17 @@ export class Application {
 
     if (this.role === "api" || this.role === "all") {
       this.server = await createServer(this.cradle, this.modules);
-      await this.server.listen({ host: config.http.host, port: config.http.port });
-      this.logger.info("API escuchando", {
-        url: `http://${config.http.host}:${String(config.http.port)}`,
-      });
+
+      if (this.options.listen === false) {
+        // Rutas registradas y plugins listos, pero sin socket. `inject()` sirve
+        // peticiones contra este mismo servidor.
+        await this.server.ready();
+      } else {
+        await this.server.listen({ host: config.http.host, port: config.http.port });
+        this.logger.info("API escuchando", {
+          url: `http://${config.http.host}:${String(config.http.port)}`,
+        });
+      }
     }
 
     this.logger.info("Aplicación lista", { modules: this.modules.map((m) => m.name) });
