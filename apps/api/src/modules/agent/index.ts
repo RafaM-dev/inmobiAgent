@@ -309,6 +309,8 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
             },
             usage: c.usageLedger,
             defaultMonthlyBudgetUsd: c.config.agent.monthlyBudgetUsd,
+            rateLimiter: c.rateLimiter,
+            turnQuota: c.config.rateLimit.contactTurns,
             capabilitiesOf: async (channelAccountId: string) => {
               const found = await c.getChannelCapabilities.execute(channelAccountId);
               // Si la cuenta desapareció, se asume el canal más pobre posible:

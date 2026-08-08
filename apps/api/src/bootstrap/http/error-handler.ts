@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { type AppError, toAppError } from "../../platform/errors/app-error";
+import { RateLimitedError, type AppError, toAppError } from "../../platform/errors/app-error";
 import type { Logger } from "../../platform/logging/logger";
 
 /**
@@ -40,6 +40,19 @@ export const registerErrorHandler = (app: FastifyInstance, logger: Logger): void
 
     if (appError.operational) {
       logger.warn("Error operacional atendido", logFields);
+
+      /*
+       * `Retry-After` no es cosmético: es lo que convierte un 429 en un aplazo
+       * en vez de una pérdida. Los proveedores de canal lo respetan, así que
+       * decir cuándo volver es lo que hace que el mensaje del cliente llegue
+       * más tarde en lugar de no llegar nunca. Va en segundos porque el
+       * estándar es así (RFC 9110), redondeando siempre hacia arriba: volver
+       * medio segundo antes de tiempo sería otro rechazo.
+       */
+      if (appError instanceof RateLimitedError) {
+        void reply.header("Retry-After", String(Math.ceil(appError.retryAfterMs / 1000)));
+      }
+
       void reply.status(appError.httpStatus).send(appError.toPublicJSON(correlationId));
       return;
     }

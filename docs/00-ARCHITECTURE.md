@@ -344,9 +344,13 @@ agentInmobi/
        content: Block[], receivedAt, raw }
 4. Idempotencia: si externalMessageId ya existe → descartar
 5. TenantResolver: channelAccountId → tenantId  (nunca se confía en el payload)
-6. IngestInboundMessage: resuelve/crea Contact + Conversation, persiste Message
-7. Emite InboundMessageReceived → encola TurnScheduler
+6. RateLimiter: cubo de fichas por tenant, cost = mensajes del lote
+     → agotado: 429 + Retry-After  (el proveedor reintenta; nada se pierde)
+7. IngestInboundMessage: resuelve/crea Contact + Conversation, persiste Message
+8. Emite InboundMessageReceived → encola TurnScheduler
 ```
+
+**El paso 6 va después del 5 y no antes, y eso no es casual.** El límite global de Fastify cuenta por IP, y por la IP de un proveedor entran los mensajes de todas las inmobiliarias: cortar ahí castigaría a las demás por el bucle de una. Solo aquí se sabe de quién es el tráfico (D60).
 
 ### 7.2 Buffer de turno (detalle crítico del mundo real)
 
@@ -368,6 +372,12 @@ TurnScheduler:
 ┌─ 1. Cargar contexto ──────────────────────────────────────────────────┐
 │  AgentConfig(tenant) + ConversationWindow + Summary + ContactProfile   │
 │  + ChannelCapabilities + Tools habilitadas                            │
+└───────────────────────────────────────────────────────────────────────┘
+                              ▼
+┌─ 1b. Puertas baratas (nada de esto llama al modelo) ──────────────────┐
+│  ¿El bot sigue al mando? → un humano tomó la conversación: SKIPPED    │
+│  RateLimiter por contacto → agotado: turno omitido + 1 aviso/10 min   │
+│  SpendLimit del mes        → agotado: handoff a una persona           │
 └───────────────────────────────────────────────────────────────────────┘
                               ▼
 ┌─ 2. Pre-procesado determinista ───────────────────────────────────────┐
@@ -669,7 +679,7 @@ Cada fase termina con: tests verdes, demo funcionando **sin API keys**, y docume
 | **F6 — Canal WhatsApp** ✅ | Adaptador Cloud API: webhook firmado (HMAC sobre el cuerpo crudo), reparto del payload por número, mapeadores puros de entrada y salida, degradación de botones, credenciales cifradas por cuenta, acuses de entrega correlacionados. | ✅ Un webhook firmado entra por la API y recorre catálogo, agenda y conocimiento **sin tocar un solo caso de uso**; sin firma se rechaza con 403. Verificado contra un doble de la Graph API. Pendiente de una cuenta real: plantillas y media (§18.3). 381 tests. |
 | **F7 — Back-office React** ✅ | Sesiones opacas con cookie `httpOnly` y guardia que fija el `TenantContext`, API del panel, aplicación React 19 + Vite, inbox en vivo (SSE) con toma de control humano, leads, agenda, base de conocimiento (subir, reindexar, borrar), configuración del agente y **simulador**. Contratos Zod compartidos entre API y web. | ✅ Un asesor opera todo el producto desde el navegador: lee lo que vio el cliente **en bloques**, toma el control, devuelve la conversación al agente, sube un documento y lo ve indexarse, cambia el tono y prueba el resultado en el simulador —que habla por la **misma ruta pública que un cliente**—. Sin token en `localStorage` y sin API keys. 414 tests, 0 violaciones de arquitectura. |
 | **F8 — Providers reales** ✅ | Adaptadores de Anthropic (Messages API) y del formato Chat Completions —que sirve para OpenAI, Ollama y todo lo compatible—. Traducción en funciones puras y testeadas, coste estimado por turno, fallo al arrancar si falta una credencial. La suite de contrato corre contra los proveedores de verdad, y se salta sola cuando no hay clave. | ✅ `LLM_PROVIDER=anthropic` (u `openai`, u `ollama`) y **nada más cambia**: ni un caso de uso, ni una política, ni una herramienta. Sin `LLM_PROVIDER`, el producto sigue funcionando entero en modo demo sin ninguna clave. 436 tests, 0 violaciones de arquitectura. |
-| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Pendiente:** rate limiting por tenant, OpenTelemetry, backups, dashboards, evaluación automática de calidad. | SLOs definidos y medidos; runbook de incidentes. |
+| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Límites de ritmo** en dos ámbitos —mensajes por inmobiliaria en la puerta de los canales, turnos por contacto en el agente— sobre un cubo de fichas puro. **Pendiente:** OpenTelemetry, backups, dashboards, evaluación automática de calidad. | SLOs definidos y medidos; runbook de incidentes. |
 | **F10 — Escala** | Canales adicionales, memoria semántica, A/B de prompts, colas Redis, réplicas de lectura. | Extraer un módulo a servicio propio sin reescribir lógica. |
 
 ### Orden de implementación consciente
@@ -750,6 +760,7 @@ Pasar a producción = cambiar variables de entorno. Ni un import distinto en el 
 | Acoplamiento a un proveedor de catálogo | Regla de lint equivalente para adaptadores de `catalog`. |
 | Fuga entre tenants | RLS + repositorio base + tests que intentan acceso cruzado explícitamente. |
 | Duplicados por reintentos de webhook | Unicidad de `provider_message_id` + inbox de eventos. |
+| Ráfagas y abuso: un bucle de integración o un número que insiste | Cubo de fichas en dos ámbitos (D58–D62): mensajes por inmobiliaria → 429 con `Retry-After`, así que el proveedor reintenta; turnos por contacto → el turno se omite y se avisa una vez. Complementa al tope de gasto, que acota el mes: esto acota el minuto. |
 
 ---
 
@@ -816,6 +827,11 @@ Pasar a producción = cambiar variables de entorno. Ni un import distinto en el 
 | D55 | **La aplicación se conecta con un rol SIN superusuario, y sin eso RLS no protege nada.** Un superusuario se salta todas las políticas incluso con `FORCE ROW LEVEL SECURITY`, y el usuario que crea `docker compose` lo es. Con las políticas activas y el rol equivocado, todo *parece* correcto: existen, se ven en `pg_class`, y no hacen absolutamente nada. Lo destapó un test que insertaba filas de dos inmobiliarias y contaba sin filtrar: salían las tres. `pnpm db:provision` crea el rol y **reafirma sus atributos en cada migración**, por si alguien puso un `BYPASSRLS` para depurar y se olvidó de quitarlo. | ✅ Cerrada | 2026-08-07 |
 | D56 | **`SET LOCAL` dentro de una transacción, nunca a nivel de sesión.** Con un pool, un ajuste de sesión se queda pegado a la conexión y la siguiente petición que la reutilice hereda el tenant de la anterior — un fallo PEOR que no tener RLS, porque devuelve datos ajenos en vez de ninguno. Las lecturas sueltas se envuelven en una transacción de dos sentencias, lo que **cuesta un viaje de ida y vuelta extra por consulta**. Es un precio consciente: la alternativa es que el aislamiento dependa de que ningún repositorio se olvide nunca. | ✅ Cerrada | 2026-08-07 |
 | D57 | **Cruzar la frontera entre inmobiliarias es posible, pero hay que escribirlo.** El seed y el mantenimiento usan `runAcrossTenants()`, que fija el comodín y deja rastro en el log. Que sea explícito y buscable es la propiedad que se quiere: nadie cruza por accidente, y `grep` encuentra en un segundo cada sitio que lo hace. | ✅ Cerrada | 2026-08-07 |
+| D58 | **El límite de ritmo se cuenta EN MEMORIA, a diferencia del gasto.** Con N réplicas el límite efectivo es N veces el configurado, y eso sería inaceptable para el tope de gasto —donde el número tiene que cuadrar con una factura, y por eso vive en una sentencia atómica de Postgres. Aquí sí lo es, por tres razones: lo que se protege es el orden de magnitud (cortar a 120 o a 360 da igual; cortar o no cortar, no); el límite se comprueba en el camino más caliente que existe —cada mensaje entrante— y llevarlo a la base convertiría cada mensaje en una escritura extra, de modo que el mecanismo que debía protegerla sería la carga que la tumba; y un contador en memoria sigue funcionando cuando la base está ahogada, que es justo cuando hace falta. El reemplazo por Redis es un adaptador detrás del mismo puerto: el algoritmo ya es una función pura. | ✅ Cerrada | 2026-08-08 |
+| D59 | **Cubo de fichas, no ventana fija.** Una ventana fija de "200 por minuto" deja pasar 400 en dos segundos si caen a caballo del cambio de minuto: el peor caso es el doble del límite que creías haber puesto. Un registro deslizante no tiene ese defecto pero guarda una marca de tiempo por petición. El cubo cuesta dos números por clave y describe el tráfico real mejor que ninguno: una ráfaga tolerada y un ritmo sostenido que se repone. Un proveedor entrega un lote y luego gotea; un bucle martillea. El primero pasa, el segundo se corta. | ✅ Cerrada | 2026-08-08 |
+| D60 | **El límite de entrada NO puede vivir en el servidor HTTP.** El límite global de Fastify cuenta por IP, y por la IP de Meta entran los mensajes de TODAS las inmobiliarias: cortar ahí castigaría a las demás por el bucle de una. El tenant solo se conoce después de resolver la cuenta de canal, así que la comprobación va en `ReceiveInboundMessage`. Y **el lote cuesta lo que trae**: si un webhook con cincuenta mensajes contara igual que uno con uno, agrupar sería la forma trivial de saltárselo, y los proveedores agrupan de serie. Un lote mayor que el cubo se recorta al cubo en vez de ser impagable — si no, el proveedor reintentaría para siempre y ninguno de sus mensajes entraría jamás. | ✅ Cerrada | 2026-08-08 |
+| D61 | **Superar el límite de entrada devuelve 429 con `Retry-After`; superar el de turnos omite el turno y avisa una sola vez.** Son dos degradaciones distintas porque son dos problemas distintos. En la entrada, el 429 hace que el proveedor reintente: la conversación se aplaza, no se rompe. En el turno, los mensajes del cliente YA están guardados y la conversación sigue abierta, así que dejar de generar no pierde nada; escalar a una persona —como sí hace el tope de gasto, donde el problema es de la inmobiliaria— convertiría el abuso de un solo número en una forma de inundar el buzón del equipo. El aviso sale de su propio cubo de una ficha cada diez minutos: repetirlo en cada mensaje bloqueado sería duplicar la inundación por el otro lado, y en WhatsApp además pagar por hacerlo. | ✅ Cerrada | 2026-08-08 |
+| D62 | **Si el limitador falla, se deja pasar.** Misma regla que el contador de gasto: no poder medir el ritmo es un problema nuestro, y convertirlo en clientes sin respuesta sería un problema mucho mayor. Una protección no puede ser más dañina que aquello de lo que protege. | ✅ Cerrada | 2026-08-08 |
 
 ## 18. Decisiones abiertas
 

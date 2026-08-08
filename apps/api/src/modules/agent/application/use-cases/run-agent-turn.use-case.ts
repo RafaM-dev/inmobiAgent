@@ -3,6 +3,8 @@ import type { AppError } from "../../../../platform/errors/app-error";
 import type { EventPublisher } from "../../../../platform/events/event-publisher";
 import type { IdGenerator } from "../../../../platform/ids/id-generator";
 import type { Logger } from "../../../../platform/logging/logger";
+import type { RateLimiter } from "../../../../platform/rate-limit/rate-limiter";
+import type { Quota } from "../../../../platform/rate-limit/token-bucket";
 import { isErr, ok, type Result } from "../../../../platform/result/result";
 import { TenantContext } from "../../../../platform/tenancy/tenant-context";
 import {
@@ -90,6 +92,15 @@ export interface RunAgentTurnResult {
  * La regla es general y no habla de citas: un bloque interactivo al que le
  * sigue cualquier otro contenido ya no es una pregunta abierta.
  */
+/**
+ * Cuota del aviso de "vas muy rápido": una ficha cada diez minutos.
+ *
+ * Es el mismo cubo de fichas, usado para algo que no es un límite sino un
+ * antirrebote. Que la primitiva sirva para las dos cosas sin código nuevo es la
+ * señal de que estaba bien elegida.
+ */
+const NOTICE_QUOTA: Quota = { burst: 1, perMinute: 0.1 };
+
 const pruneAnsweredPrompts = (blocks: readonly ReplyBlock[]): ReplyBlock[] => {
   const kept: ReplyBlock[] = [];
 
@@ -124,6 +135,9 @@ export class RunAgentTurnUseCase {
       usage: UsageLedger;
       /** Tope mensual por defecto en USD. `0` o ausente = sin tope. */
       defaultMonthlyBudgetUsd?: number;
+      /** Ritmo tolerado por contacto. Protege de un número que no para. */
+      rateLimiter: RateLimiter;
+      turnQuota: Quota;
       /**
        * Capacidades del canal por el que va la conversación. Se consultan por
        * conversación y no se fijan aquí: el mismo agente atiende una terminal
@@ -163,8 +177,19 @@ export class RunAgentTurnUseCase {
       return ok({ runId: "", status: "SKIPPED", reply: "", toolCalls: 0 });
     }
 
+    /*
+     * Ritmo del contacto. Va ANTES de cargar la inmobiliaria y de abrir una
+     * ejecución: si este turno no se va a correr, lo más barato es descubrirlo
+     * ya. No hay `AgentRun` que registrar porque no ha habido ejecución alguna.
+     */
+    const tenantId = TenantContext.requireTenantId();
+    if (await this.throttled(tenantId, command)) {
+      clearTimeout(timer);
+      return ok({ runId: "", status: "SKIPPED", reply: "", toolCalls: 0 });
+    }
+
     // El tenant sale del ámbito de ejecución, nunca de datos de la conversación.
-    const tenant = await this.deps.tenants.requireActive(TenantContext.requireTenantId());
+    const tenant = await this.deps.tenants.requireActive(tenantId);
     const capabilities = await this.deps.capabilitiesOf(context.channelAccountId);
 
     const run = AgentRun.start({
@@ -444,6 +469,75 @@ export class RunAgentTurnUseCase {
    * sin atender a los clientes de todas las inmobiliarias porque no se pudo
    * leer un contador es un daño mayor que un rato sin tope.
    */
+  /**
+   * ¿Este contacto está pidiendo turnos más deprisa de lo razonable?
+   *
+   * **Qué protege exactamente.** Las ráfagas cortas —cinco mensajes seguidos
+   * mientras alguien piensa en voz alta— ya las une el debounce de turnos: eso
+   * es UN turno, no cinco, y está bien así. Lo que esto corta es lo SOSTENIDO:
+   * un número que manda un mensaje cada pocos segundos durante una hora. Ahí no
+   * hay un cliente escribiendo, hay un bucle o un abuso, y cada turno cuesta
+   * dinero y ocupa un hueco que necesita alguien de verdad.
+   *
+   * **Por qué se salta el turno en vez de escalar.** El tope de gasto escala a
+   * una persona porque el problema es de la inmobiliaria y hay que avisarla.
+   * Aquí el problema es un solo contacto, y mandar a un asesor cada número que
+   * insiste convertiría el abuso en una forma de inundar el buzón del equipo.
+   * Los mensajes del cliente están todos guardados y la conversación sigue
+   * abierta: no se pierde nada, solo se deja de generar.
+   *
+   * **Y se avisa una sola vez.** El aviso sale de su propio cubo de una ficha
+   * cada diez minutos: quien se pasa recibe una explicación, no un eco de su
+   * propia insistencia. Repetirlo en cada mensaje bloqueado sería duplicar el
+   * problema por el otro lado —y en WhatsApp, además, pagar por hacerlo.
+   */
+  private async throttled(tenantId: string, command: RunAgentTurnCommand): Promise<boolean> {
+    let decision;
+    try {
+      decision = await this.deps.rateLimiter.consume({
+        key: `turn:${tenantId}:${command.contactId}`,
+        quota: this.deps.turnQuota,
+      });
+    } catch (error) {
+      // No poder medir el ritmo no puede dejar a un cliente sin respuesta.
+      this.deps.logger.error("No se pudo medir el ritmo: el turno sigue sin límite", {
+        conversationId: command.conversationId,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+
+    if (decision.allowed) return false;
+
+    this.deps.logger.warn("Turno omitido por ritmo del contacto", {
+      tenantId,
+      conversationId: command.conversationId,
+      contactId: command.contactId,
+      retryAfterMs: decision.retryAfterMs,
+    });
+
+    const notice = await this.deps.rateLimiter
+      .consume({ key: `turn-notice:${tenantId}:${command.contactId}`, quota: NOTICE_QUOTA })
+      .catch(() => ({ allowed: false, remaining: 0, retryAfterMs: 0 }));
+
+    if (notice.allowed) {
+      // `SYSTEM` y no `AGENT`: no es el agente hablando, es la plataforma
+      // explicando por qué no lo hace.
+      await this.deps.conversations.reply({
+        conversationId: command.conversationId,
+        blocks: [
+          textBlock(
+            "Estoy recibiendo muchos mensajes seguidos y necesito un momento. " +
+              "Escríbeme en un minuto y seguimos.",
+          ),
+        ],
+        authorType: MessageAuthorType.SYSTEM,
+      });
+    }
+
+    return true;
+  }
+
   private async checkSpendLimit(
     tenant: TenantView,
     now: Date,

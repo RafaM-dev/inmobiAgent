@@ -1,7 +1,14 @@
 import type { UnitOfWork } from "../../../../platform/database/unit-of-work";
-import { NotFoundError, ForbiddenError, type AppError } from "../../../../platform/errors/app-error";
+import {
+  NotFoundError,
+  ForbiddenError,
+  RateLimitedError,
+  type AppError,
+} from "../../../../platform/errors/app-error";
 import type { EventPublisher } from "../../../../platform/events/event-publisher";
 import type { Logger } from "../../../../platform/logging/logger";
+import type { RateLimiter } from "../../../../platform/rate-limit/rate-limiter";
+import type { Quota } from "../../../../platform/rate-limit/token-bucket";
 import { err, ok, isErr, type Result } from "../../../../platform/result/result";
 import { TenantContext } from "../../../../platform/tenancy/tenant-context";
 import type { TenantDirectory } from "../../../identity";
@@ -38,6 +45,10 @@ export interface ReceiveInboundMessageResult {
  * 3. Este caso de uso NO persiste la conversación ni responde: solo normaliza y
  *    publica. Así el webhook contesta en milisegundos y el trabajo real ocurre
  *    fuera de la petición del proveedor.
+ * 4. El RITMO se comprueba aquí y no en el servidor HTTP. El límite global de
+ *    Fastify cuenta por IP, y por la IP de Meta entran los mensajes de TODAS
+ *    las inmobiliarias: cortar ahí castigaría a las demás por el bucle de una.
+ *    Solo en este punto se sabe de quién es el tráfico.
  */
 export class ReceiveInboundMessageUseCase {
   constructor(
@@ -47,6 +58,9 @@ export class ReceiveInboundMessageUseCase {
       tenants: TenantDirectory;
       events: EventPublisher;
       unitOfWork: UnitOfWork;
+      rateLimiter: RateLimiter;
+      /** Ritmo tolerado por inmobiliaria. Cuota inactiva = sin límite. */
+      messageQuota: Quota;
       logger: Logger;
     },
   ) {}
@@ -87,6 +101,9 @@ export class ReceiveInboundMessageUseCase {
 
         const messages = normalized.value;
 
+        const throttled = await this.checkRate(account.tenantId, messages.length);
+        if (throttled) return err(throttled);
+
         // Todos los mensajes del lote se publican en la MISMA transacción: si
         // el webhook trae tres y falla el tercero, el proveedor reintentará el
         // lote entero, y la idempotencia por `externalMessageId` se encarga del
@@ -120,5 +137,49 @@ export class ReceiveInboundMessageUseCase {
         });
       },
     );
+  }
+
+  /**
+   * Ritmo de entrada de la inmobiliaria.
+   *
+   * **El lote cuesta lo que trae, no una ficha.** Si un webhook con cincuenta
+   * mensajes contara igual que uno con uno, agrupar sería la forma trivial de
+   * saltarse el límite, y los proveedores agrupan de serie.
+   *
+   * Devolver 429 no pierde el mensaje: los proveedores de canal reintentan, y
+   * el `Retry-After` les dice cuándo. Frente a la alternativa —aceptar y tirar
+   * en silencio— esto aplaza la conversación en lugar de romperla, que es la
+   * única degradación aceptable cuando al otro lado hay un cliente esperando.
+   *
+   * Si el limitador falla, se DEJA PASAR. Misma regla que el tope de gasto: no
+   * poder medir el ritmo es un problema nuestro, y convertirlo en una caída del
+   * servicio para todas las inmobiliarias sería un problema mucho mayor.
+   */
+  private async checkRate(tenantId: string, messageCount: number): Promise<AppError | null> {
+    if (messageCount === 0) return null;
+
+    try {
+      const decision = await this.deps.rateLimiter.consume({
+        key: `inbound:${tenantId}`,
+        quota: this.deps.messageQuota,
+        cost: messageCount,
+      });
+
+      if (decision.allowed) return null;
+
+      this.deps.logger.warn("Mensajes entrantes limitados por ritmo", {
+        tenantId,
+        messageCount,
+        retryAfterMs: decision.retryAfterMs,
+      });
+
+      return new RateLimitedError("inbound", decision.retryAfterMs);
+    } catch (error) {
+      this.deps.logger.error("No se pudo medir el ritmo: el lote pasa sin límite", {
+        tenantId,
+        err: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 }

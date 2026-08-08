@@ -3,6 +3,9 @@ import type { AppError } from "../../../platform/errors/app-error";
 import { RecordingEventPublisher } from "../../../platform/events/event-publisher";
 import { SequentialIdGenerator } from "../../../platform/ids/id-generator";
 import { NoopLogger } from "../../../platform/logging/logger";
+import { InMemoryRateLimiter } from "../../../platform/rate-limit/in-memory-rate-limiter";
+import type { RateLimiter } from "../../../platform/rate-limit/rate-limiter";
+import type { Quota, RateLimitDecision } from "../../../platform/rate-limit/token-bucket";
 import { ok, okVoid, type Result } from "../../../platform/result/result";
 import { blocksToText, defaultCapabilities, type ReplyBlock } from "../../channels";
 import { createInMemoryCatalog, type InMemoryCatalog } from "../../catalog/testing/in-memory-catalog";
@@ -171,6 +174,29 @@ export class FakeConversationService implements ConversationService {
   }
 }
 
+/**
+ * Limitador real, pero que se puede romper a voluntad.
+ *
+ * Cuenta de verdad —es el mismo cubo de fichas de producción— y además permite
+ * simular que la infraestructura que lo sostiene se cae. Ese camino importa
+ * tanto como el otro: una protección que deja al cliente sin respuesta cuando
+ * ella misma falla es peor que no tenerla.
+ */
+export class ControllableRateLimiter implements RateLimiter {
+  private failure: Error | undefined;
+
+  constructor(private readonly inner: RateLimiter) {}
+
+  breakWith(error: Error): void {
+    this.failure = error;
+  }
+
+  consume(input: Parameters<RateLimiter["consume"]>[0]): Promise<RateLimitDecision> {
+    if (this.failure) return Promise.reject(this.failure);
+    return this.inner.consume(input);
+  }
+}
+
 export class InMemoryAgentRunRepository implements AgentRunRepository {
   readonly runs: AgentRun[] = [];
 
@@ -202,6 +228,9 @@ export interface Harness {
   readonly appointments: InMemoryAppointments;
   readonly knowledge: InMemoryKnowledge;
   readonly usage: InMemoryUsageLedger;
+  /** Expuesto para poder mover el tiempo: los límites de ritmo se reponen. */
+  readonly clock: FixedClock;
+  readonly rateLimiter: ControllableRateLimiter;
 }
 
 export const createHarness = (options: {
@@ -211,6 +240,8 @@ export const createHarness = (options: {
   limits?: { maxIterations: number; maxToolCalls: number; timeoutMs: number };
   /** Tope de gasto mensual en USD. `0` o ausente = sin tope. */
   monthlyBudgetUsd?: number;
+  /** Ritmo tolerado por contacto. Por defecto, el mismo que en producción. */
+  turnQuota?: Quota;
 } = {}): Harness => {
   const tokens = new HeuristicTokenCounter();
   const conversations = new FakeConversationService(options.missing ?? []);
@@ -251,6 +282,7 @@ export const createHarness = (options: {
   tools.register(createScheduleVisitTool({ appointments: appointments.service }));
 
   const usage = new InMemoryUsageLedger();
+  const rateLimiter = new ControllableRateLimiter(new InMemoryRateLimiter({ clock, logger }));
 
   const runTurn = new RunAgentTurnUseCase({
     conversations,
@@ -276,8 +308,24 @@ export const createHarness = (options: {
     ...(options.monthlyBudgetUsd !== undefined
       ? { defaultMonthlyBudgetUsd: options.monthlyBudgetUsd }
       : {}),
+    rateLimiter,
+    // Los mismos valores que trae el producto: si un cambio en el límite
+    // rompiera un escenario realista, se quiere saber aquí y no en producción.
+    turnQuota: options.turnQuota ?? { burst: 20, perMinute: 12 },
     capabilitiesOf: () => Promise.resolve(defaultCapabilities({ maxTextLength: 1200 })),
   });
 
-  return { runTurn, conversations, runs, events, catalog, leads, appointments, knowledge, usage };
+  return {
+    runTurn,
+    conversations,
+    runs,
+    events,
+    catalog,
+    leads,
+    appointments,
+    knowledge,
+    usage,
+    clock,
+    rateLimiter,
+  };
 };

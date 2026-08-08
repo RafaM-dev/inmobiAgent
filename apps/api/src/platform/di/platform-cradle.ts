@@ -8,6 +8,7 @@ import type { EventPublisher } from "../events/event-publisher";
 import type { OutboxRelay, OutboxStore } from "../events/outbox";
 import type { IdGenerator } from "../ids/id-generator";
 import type { Logger } from "../logging/logger";
+import type { RateLimiter } from "../rate-limit/rate-limiter";
 import type { FileStorage } from "../storage/file-storage";
 
 /**
@@ -28,6 +29,8 @@ export interface PlatformCradle {
   unitOfWork: UnitOfWork;
   /** Originales de los archivos: hoy en disco, mañana en S3 (D27). */
   fileStorage: FileStorage;
+  /** Ritmo tolerado por clave: hoy en memoria, mañana en Redis (D58). */
+  rateLimiter: RateLimiter;
 
   outboxStore: OutboxStore;
   idempotencyStore: IdempotencyStore;

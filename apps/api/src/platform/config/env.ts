@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Quota } from "../rate-limit/token-bucket";
 
 /**
  * Configuración validada al arrancar.
@@ -71,6 +72,22 @@ const envSchema = z
        lo correcto en modo demo (donde el gasto real es cero) y lo que evita
        que a nadie se le apague el agente por un límite que no configuró. */
     TENANT_MONTHLY_BUDGET_USD: z.coerce.number().min(0).max(1_000_000).default(0),
+
+    /* Límites de RITMO por inmobiliaria. Complementan al tope de gasto, no lo
+       sustituyen: el tope acota la factura del mes y estos acotan el daño que
+       puede hacer un bucle o un abuso en los próximos sesenta segundos —antes
+       de que ese daño llegue a ser factura. Cero = sin límite, igual que allí.
+
+       Dos ámbitos porque son dos problemas distintos:
+        · MENSAJES por inmobiliaria: protege el proceso y la base de datos de
+          una integración rota. Se comprueba al entrar, antes de tocar nada.
+        · TURNOS por contacto: protege la factura de IA y el buzón del asesor
+          de un número que insiste sin parar. Las ráfagas cortas ya las une el
+          debounce de turnos, así que esto corta lo SOSTENIDO. */
+    RATE_LIMIT_TENANT_MESSAGES_PER_MINUTE: z.coerce.number().int().min(0).default(120),
+    RATE_LIMIT_TENANT_MESSAGES_BURST: z.coerce.number().int().min(0).default(240),
+    RATE_LIMIT_CONTACT_TURNS_PER_MINUTE: z.coerce.number().int().min(0).default(12),
+    RATE_LIMIT_CONTACT_TURNS_BURST: z.coerce.number().int().min(0).default(20),
 
     /* WhatsApp Cloud API. El App Secret y el token de verificación son de la
        APP de Meta —una sola para toda la plataforma—, mientras que el token de
@@ -183,6 +200,16 @@ export interface AppConfig {
     /** Tope de gasto por inmobiliaria y mes, en USD. `0` = sin tope. */
     monthlyBudgetUsd: number;
   };
+  /**
+   * Ritmo tolerado por inmobiliaria. `burst` es lo que se aguanta de golpe;
+   * `perMinute`, lo que se repone. Cero en cualquiera de los dos = sin límite.
+   */
+  readonly rateLimit: {
+    /** Mensajes entrantes por inmobiliaria, en la puerta de los canales. */
+    tenantMessages: Quota;
+    /** Turnos del agente por contacto. Acota lo que un número puede gastar. */
+    contactTurns: Quota;
+  };
   readonly storage: { driver: "local"; dir: string };
   readonly knowledge: { maxDocumentBytes: number };
   readonly security: { encryptionKey: Buffer };
@@ -234,6 +261,16 @@ const toAppConfig = (env: Env): AppConfig => ({
     graphUrl: env.WHATSAPP_GRAPH_URL,
     apiVersion: env.WHATSAPP_API_VERSION,
     timeoutMs: env.WHATSAPP_TIMEOUT_MS,
+  },
+  rateLimit: {
+    tenantMessages: {
+      perMinute: env.RATE_LIMIT_TENANT_MESSAGES_PER_MINUTE,
+      burst: env.RATE_LIMIT_TENANT_MESSAGES_BURST,
+    },
+    contactTurns: {
+      perMinute: env.RATE_LIMIT_CONTACT_TURNS_PER_MINUTE,
+      burst: env.RATE_LIMIT_CONTACT_TURNS_BURST,
+    },
   },
   storage: { driver: env.STORAGE_DRIVER, dir: env.STORAGE_DIR },
   knowledge: { maxDocumentBytes: env.KNOWLEDGE_MAX_DOCUMENT_BYTES },

@@ -162,7 +162,7 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-452 tests unitarios con dobles en memoria, y 47 de integración contra Postgres
+475 tests unitarios con dobles en memoria, y 51 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -190,7 +190,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · rate limiting, OpenTelemetry | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · OpenTelemetry, backups, runbook | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy
@@ -247,6 +247,14 @@ CLI · WhatsApp · simulador ──HTTP──▶ channels ──evento──▶ 
   insiste, pasa la conversación a una persona antes que enviar el dato.
 - **Presupuesto por turno.** Iteraciones, herramientas y tiempo. Agotarlo no deja al
   cliente sin respuesta: responde lo que tenga y escala.
+- **Tres frenos distintos, para tres problemas distintos.** El presupuesto acota el
+  *turno*; el tope de gasto acota el *mes* con un contador transaccional y, al agotarse,
+  pasa la conversación a una persona; los límites de ritmo acotan el *minuto*. Estos
+  últimos van en dos ámbitos: los mensajes de una inmobiliaria se cortan con un 429 y su
+  `Retry-After` —el proveedor reintenta, así que el mensaje se aplaza y no se pierde—, y
+  los turnos de un contacto que insiste sin parar se omiten con un aviso, uno solo, cada
+  diez minutos. Un límite en cero significa *sin límite*: a quien olvidó configurarlo no
+  se le puede apagar el agente.
 - **Todo turno deja traza.** `agent_runs` y `agent_run_steps` guardan qué herramientas se
   llamaron, con qué argumentos, cuánto tardaron, qué modelo respondió y qué costó.
 - **No somos dueños del catálogo, y se nota.** No hay tabla de inmuebles. `PropertyService`

@@ -131,6 +131,29 @@ export class ForbiddenError extends AppError {
 }
 
 /**
+ * Se pidió más deprisa de lo que se tolera.
+ *
+ * NO es un rechazo definitivo, y por eso lleva `retryAfterMs`: el mensaje no se
+ * ha perdido, solo hay que volver a traerlo. Los proveedores de canal
+ * reintentan ante un 429, así que devolver esto por un webhook aplaza el lote
+ * en vez de tirarlo — que es la diferencia entre proteger el sistema y perder
+ * la conversación de un cliente.
+ */
+export class RateLimitedError extends AppError {
+  readonly retryAfterMs: number;
+
+  constructor(scope: string, retryAfterMs: number) {
+    super({
+      message: "Demasiadas peticiones seguidas. Vuelve a intentarlo en unos segundos.",
+      code: ErrorCode.RATE_LIMITED,
+      httpStatus: 429,
+      context: { scope, retryAfterMs },
+    });
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
  * Fallo de una dependencia externa (LLM, PropertyService, API de un canal).
  * El agente lo traduce a lenguaje natural sin inventar datos.
  */

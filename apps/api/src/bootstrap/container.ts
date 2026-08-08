@@ -12,6 +12,8 @@ import { OutboxEventPublisher } from "../platform/events/event-publisher";
 import { OutboxRelay } from "../platform/events/outbox";
 import { UuidV7Generator } from "../platform/ids/id-generator";
 import { createPinoRoot, PinoLogger } from "../platform/logging/pino-logger";
+import { InMemoryRateLimiter } from "../platform/rate-limit/in-memory-rate-limiter";
+import type { RateLimiter } from "../platform/rate-limit/rate-limiter";
 import type { FileStorage } from "../platform/storage/file-storage";
 import { LocalFileStorage } from "../platform/storage/local-file-storage";
 import type { FastifyInstance } from "fastify";
@@ -84,6 +86,21 @@ export const buildContainer = (config: AppConfig): AwilixContainer<AppCradle> =>
      */
     fileStorage: asFunction(
       (c: AppCradle): FileStorage => new LocalFileStorage(c.config.storage.dir),
+    ).singleton(),
+
+    /**
+     * ÚNICO punto donde se elige dónde se cuentan los ritmos.
+     *
+     * En memoria mientras haya un proceso; un adaptador de Redis detrás del
+     * mismo puerto el día que haya varios (D58). El algoritmo —el cubo de
+     * fichas— es una función pura que ambos comparten sin cambios.
+     */
+    rateLimiter: asFunction(
+      (c: AppCradle): RateLimiter =>
+        new InMemoryRateLimiter({
+          clock: c.clock,
+          logger: c.logger.child({ component: "rate-limiter" }),
+        }),
     ).singleton(),
 
     outboxStore: asFunction((c: AppCradle) => new PrismaOutboxStore(c.database)).singleton(),
