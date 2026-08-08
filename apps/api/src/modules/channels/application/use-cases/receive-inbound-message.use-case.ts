@@ -10,6 +10,7 @@ import type { Logger } from "../../../../platform/logging/logger";
 import type { RateLimiter } from "../../../../platform/rate-limit/rate-limiter";
 import type { Quota } from "../../../../platform/rate-limit/token-bucket";
 import { err, ok, isErr, type Result } from "../../../../platform/result/result";
+import type { AppMetrics } from "../../../../platform/telemetry/app-metrics";
 import { TenantContext } from "../../../../platform/tenancy/tenant-context";
 import type { TenantDirectory } from "../../../identity";
 import type { ChannelAccountRepository } from "../../domain/repositories/channel-account.repository";
@@ -61,6 +62,7 @@ export class ReceiveInboundMessageUseCase {
       rateLimiter: RateLimiter;
       /** Ritmo tolerado por inmobiliaria. Cuota inactiva = sin límite. */
       messageQuota: Quota;
+      metrics: AppMetrics;
       logger: Logger;
     },
   ) {}
@@ -102,7 +104,13 @@ export class ReceiveInboundMessageUseCase {
         const messages = normalized.value;
 
         const throttled = await this.checkRate(account.tenantId, messages.length);
-        if (throttled) return err(throttled);
+        if (throttled) {
+          this.deps.metrics.inboundMessages.inc(
+            { channel: command.channelType, outcome: "rate_limited" },
+            messages.length,
+          );
+          return err(throttled);
+        }
 
         // Todos los mensajes del lote se publican en la MISMA transacción: si
         // el webhook trae tres y falla el tercero, el proveedor reintentará el
@@ -123,6 +131,11 @@ export class ReceiveInboundMessageUseCase {
             });
           }
         });
+
+        this.deps.metrics.inboundMessages.inc(
+          { channel: command.channelType, outcome: "accepted" },
+          messages.length,
+        );
 
         this.deps.logger.debug("Mensajes entrantes aceptados", {
           channelType: command.channelType,

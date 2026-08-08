@@ -184,6 +184,7 @@ export const channelsModule: ModuleRegistration<Cradle, FastifyInstance> = {
             unitOfWork: c.unitOfWork,
             rateLimiter: c.rateLimiter,
             messageQuota: c.config.rateLimit.tenantMessages,
+            metrics: c.appMetrics,
             logger: c.logger.child({ module: "channels" }),
           }),
       ).singleton(),

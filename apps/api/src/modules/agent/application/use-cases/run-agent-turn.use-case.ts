@@ -6,6 +6,7 @@ import type { Logger } from "../../../../platform/logging/logger";
 import type { RateLimiter } from "../../../../platform/rate-limit/rate-limiter";
 import type { Quota } from "../../../../platform/rate-limit/token-bucket";
 import { isErr, ok, type Result } from "../../../../platform/result/result";
+import type { AppMetrics } from "../../../../platform/telemetry/app-metrics";
 import { TenantContext } from "../../../../platform/tenancy/tenant-context";
 import {
   quickRepliesBlock,
@@ -138,6 +139,7 @@ export class RunAgentTurnUseCase {
       /** Ritmo tolerado por contacto. Protege de un número que no para. */
       rateLimiter: RateLimiter;
       turnQuota: Quota;
+      metrics: AppMetrics;
       /**
        * Capacidades del canal por el que va la conversación. Se consultan por
        * conversación y no se fijan aquí: el mismo agente atiende una terminal
@@ -148,7 +150,37 @@ export class RunAgentTurnUseCase {
     },
   ) {}
 
+  /**
+   * Envoltura que mide el turno.
+   *
+   * El trabajo real vive en `runTurn`, y esto es una envoltura fina por una
+   * razón concreta: `runTurn` sale por seis caminos —bot pausado, ritmo
+   * agotado, escalamiento antes o después del modelo, respuesta entregada o
+   * excepción— y medir en cada `return` sería garantizar que el séptimo que
+   * alguien añada se quede sin contar. Aquí no hay nada que recordar.
+   */
   async execute(command: RunAgentTurnCommand): Promise<Result<RunAgentTurnResult, AppError>> {
+    const startedAtMs = this.deps.clock.nowMs();
+
+    try {
+      const result = await this.runTurn(command);
+      this.recordTurn(isErr(result) ? result.error.code : result.value.status, startedAtMs);
+      return result;
+    } catch (error) {
+      this.recordTurn("FAILED", startedAtMs);
+      throw error;
+    }
+  }
+
+  private recordTurn(status: string, startedAtMs: number): void {
+    this.deps.metrics.agentTurns.inc({ status });
+    this.deps.metrics.agentTurnDuration.observe(
+      (this.deps.clock.nowMs() - startedAtMs) / 1000,
+      { status },
+    );
+  }
+
+  private async runTurn(command: RunAgentTurnCommand): Promise<Result<RunAgentTurnResult, AppError>> {
     const startedAt = this.deps.clock.now();
     const budget = new TurnBudget(this.deps.limits, this.deps.clock.nowMs(), () =>
       this.deps.clock.nowMs(),
@@ -509,6 +541,7 @@ export class RunAgentTurnUseCase {
 
     if (decision.allowed) return false;
 
+    this.deps.metrics.agentTurnsBlocked.inc({ reason: "rate_limit" });
     this.deps.logger.warn("Turno omitido por ritmo del contacto", {
       tenantId,
       conversationId: command.conversationId,
@@ -558,6 +591,10 @@ export class RunAgentTurnUseCase {
     }
 
     const decision = decideSpend({ spentUsd, limitUsd });
+
+    if (decision.verdict === SpendVerdict.BLOCK) {
+      this.deps.metrics.agentTurnsBlocked.inc({ reason: "spend_limit" });
+    }
 
     if (decision.verdict !== SpendVerdict.ALLOW) {
       this.deps.logger.warn("La inmobiliaria está en su tope de gasto", {

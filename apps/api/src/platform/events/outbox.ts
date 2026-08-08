@@ -1,5 +1,6 @@
 import type { Clock } from "../clock/clock";
 import type { Logger } from "../logging/logger";
+import type { AppMetrics } from "../telemetry/app-metrics";
 import type { EventBus } from "./event-bus";
 import type { EventEnvelope } from "./event";
 
@@ -69,7 +70,13 @@ export class OutboxRelay {
   private readonly baseBackoffMs: number;
 
   constructor(
-    private readonly deps: { store: OutboxStore; bus: EventBus; clock: Clock; logger: Logger },
+    private readonly deps: {
+      store: OutboxStore;
+      bus: EventBus;
+      clock: Clock;
+      logger: Logger;
+      metrics: AppMetrics;
+    },
     options: OutboxRelayOptions = {},
   ) {
     this.batchSize = options.batchSize ?? 50;
@@ -122,15 +129,30 @@ export class OutboxRelay {
   }
 
   private async deliver(record: OutboxRecord): Promise<boolean> {
+    const event = record.envelope.type;
+
     try {
       await this.deps.bus.publishEnvelope(record.envelope);
       await this.deps.store.markPublished([record.id], this.deps.clock.now());
+
+      this.deps.metrics.outboxDelivered.inc({ event });
+      /*
+       * El retraso se mide desde que el evento se ENCOLÓ, no desde que se
+       * reservó. Es la única forma de ver la espera real: un evento que estuvo
+       * cuatro minutos en la cola y se entrega en dos milisegundos no es una
+       * entrega rápida, es una cola que no da abasto.
+       */
+      this.deps.metrics.outboxLag.observe(
+        Math.max(0, this.deps.clock.nowMs() - record.envelope.occurredAt.getTime()) / 1000,
+        { event },
+      );
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const attempts = record.attempts + 1;
 
       if (attempts >= this.maxAttempts) {
+        this.deps.metrics.outboxDeadLettered.inc({ event });
         await this.deps.store.markDeadLettered(record.id, message);
         this.deps.logger.error("Evento enviado a dead-letter", {
           eventId: record.envelope.eventId,
@@ -146,6 +168,7 @@ export class OutboxRelay {
       const jitter = Math.floor(Math.random() * this.baseBackoffMs);
       const nextAttemptAt = new Date(this.deps.clock.nowMs() + backoff + jitter);
 
+      this.deps.metrics.outboxRetried.inc({ event });
       await this.deps.store.markFailed(record.id, message, nextAttemptAt);
       this.deps.logger.warn("Reintento programado para evento del outbox", {
         eventId: record.envelope.eventId,

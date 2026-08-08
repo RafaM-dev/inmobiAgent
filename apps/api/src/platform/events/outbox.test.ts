@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { FixedClock } from "../clock/clock";
 import { SequentialIdGenerator } from "../ids/id-generator";
 import { InMemoryLogger } from "../logging/logger";
+import { createAppMetrics } from "../telemetry/app-metrics";
+import { PrometheusMetrics } from "../telemetry/prometheus-metrics";
 import type { EventEnvelope } from "./event";
 import { defineEvent } from "./event";
 import type { EventBus } from "./event-bus";
@@ -68,8 +70,11 @@ const build = () => {
   const store = new FakeOutboxStore();
   const bus = new FakeBus();
   const clock = new FixedClock(new Date("2026-01-01T10:00:00Z"));
+  // Registro real, no un doble: así el test comprueba lo que saldría de verdad
+  // por `/metrics`, no solo que se llame al contador.
+  const registry = new PrometheusMetrics({ logger: new InMemoryLogger() });
   const relay = new OutboxRelay(
-    { store, bus, clock, logger: new InMemoryLogger() },
+    { store, bus, clock, logger: new InMemoryLogger(), metrics: createAppMetrics(registry) },
     { maxAttempts: 3, baseBackoffMs: 1000, pollIntervalMs: 10_000 },
   );
   const publisher = new OutboxEventPublisher({
@@ -77,7 +82,7 @@ const build = () => {
     clock,
     ids: new SequentialIdGenerator("evt"),
   });
-  return { store, bus, clock, relay, publisher };
+  return { store, bus, clock, relay, publisher, registry };
 };
 
 describe("Outbox", () => {
@@ -149,5 +154,75 @@ describe("Outbox", () => {
     const { relay } = build();
     await expect(relay.tick()).resolves.toBe(0);
     await relay.stop();
+  });
+
+  describe("métricas", () => {
+    it("mide el retraso desde que se ENCOLÓ, no desde que se reservó", async () => {
+      const { store, clock, relay, registry } = build();
+
+      store.pending.push({
+        id: "row-viejo",
+        envelope: {
+          eventId: "evt-1",
+          type: leadCaptured.type,
+          version: 1,
+          tenantId: "t1",
+          // Encolado hace cuarenta segundos: la cola no daba abasto.
+          occurredAt: new Date(clock.nowMs() - 40_000),
+          correlationId: "corr-1",
+          payload: { leadId: "lead-1" },
+        },
+        attempts: 0,
+        availableAt: new Date(),
+      });
+
+      await relay.tick();
+      await relay.stop();
+
+      /*
+       * La entrega en sí fue instantánea, y ahí está la trampa que esto evita:
+       * medir desde la reserva daría un retraso de cero y una gráfica plana
+       * mientras los clientes esperan cuarenta segundos por su respuesta.
+       */
+      const salida = registry.render();
+      expect(salida).toContain('agentinmobi_outbox_lag_seconds_sum{event="lead.captured"} 40');
+      expect(salida).toContain('agentinmobi_outbox_lag_seconds_bucket{event="lead.captured",le="30"} 0');
+      expect(salida).toContain('agentinmobi_outbox_lag_seconds_bucket{event="lead.captured",le="60"} 1');
+    });
+
+    it("cuenta las entregas, los reintentos y los descartes por separado", async () => {
+      const { store, bus, relay, publisher, registry } = build();
+
+      await publisher.publish(leadCaptured, { leadId: "lead-1" }, { tenantId: "t1" });
+      await relay.tick();
+
+      bus.shouldFail = true;
+      await publisher.publish(leadCaptured, { leadId: "lead-2" }, { tenantId: "t1" });
+      await relay.tick();
+
+      store.pending.push({
+        id: "row-agotado",
+        envelope: {
+          eventId: "evt-9",
+          type: leadCaptured.type,
+          version: 1,
+          tenantId: "t1",
+          occurredAt: new Date(),
+          correlationId: "corr-9",
+          payload: { leadId: "lead-9" },
+        },
+        attempts: 2,
+        availableAt: new Date(),
+      });
+      await relay.tick();
+      await relay.stop();
+
+      const salida = registry.render();
+      expect(salida).toContain('agentinmobi_outbox_delivered_total{event="lead.captured"} 1');
+      expect(salida).toContain('agentinmobi_outbox_retried_total{event="lead.captured"} 1');
+      // Cualquier valor distinto de cero aquí es una alerta: son eventos que
+      // el sistema perdió para siempre.
+      expect(salida).toContain('agentinmobi_outbox_dead_lettered_total{event="lead.captured"} 1');
+    });
   });
 });

@@ -113,6 +113,15 @@ const envSchema = z
     AGENT_TURN_DEBOUNCE_MS: z.coerce.number().int().min(0).default(2500),
     AGENT_TURN_DEBOUNCE_MAX_MS: z.coerce.number().int().min(0).default(8000),
 
+    /* Observabilidad. `GET /metrics` en formato Prometheus.
+
+       El endpoint cuenta cómo va el sistema por dentro —qué versión corre,
+       cuánto se gasta, qué falla—, así que no es público. En producción SIN
+       token la ruta no se registra: falla cerrada, y el arranque lo avisa. En
+       desarrollo está abierta, que es lo que hace útil un `curl`. */
+    METRICS_ENABLED: booleanish.default(true),
+    METRICS_TOKEN: z.string().min(16).optional(),
+
     ENCRYPTION_KEY: z
       .string()
       .refine((v) => Buffer.from(v, "base64").length === 32, {
@@ -210,6 +219,11 @@ export interface AppConfig {
     /** Turnos del agente por contacto. Acota lo que un número puede gastar. */
     contactTurns: Quota;
   };
+  readonly metrics: {
+    enabled: boolean;
+    /** Portador exigido en `GET /metrics`. Ausente = abierto (solo fuera de producción). */
+    token?: string;
+  };
   readonly storage: { driver: "local"; dir: string };
   readonly knowledge: { maxDocumentBytes: number };
   readonly security: { encryptionKey: Buffer };
@@ -271,6 +285,10 @@ const toAppConfig = (env: Env): AppConfig => ({
       perMinute: env.RATE_LIMIT_CONTACT_TURNS_PER_MINUTE,
       burst: env.RATE_LIMIT_CONTACT_TURNS_BURST,
     },
+  },
+  metrics: {
+    enabled: env.METRICS_ENABLED,
+    ...(env.METRICS_TOKEN ? { token: env.METRICS_TOKEN } : {}),
   },
   storage: { driver: env.STORAGE_DRIVER, dir: env.STORAGE_DIR },
   knowledge: { maxDocumentBytes: env.KNOWLEDGE_MAX_DOCUMENT_BYTES },

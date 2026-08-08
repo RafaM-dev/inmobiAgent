@@ -1,6 +1,7 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { Clock } from "../../../../platform/clock/clock";
 import type { Logger } from "../../../../platform/logging/logger";
+import type { AppMetrics } from "../../../../platform/telemetry/app-metrics";
 import type { LlmToolCall, LlmToolSchema } from "../ports/llm-provider";
 import {
   toolError,
@@ -43,6 +44,7 @@ export class ToolRegistry {
     private readonly deps: {
       logger: Logger;
       clock: Clock;
+      metrics: AppMetrics;
       /** Tiempo máximo por herramienta. */
       timeoutMs?: number;
     },
@@ -86,12 +88,28 @@ export class ToolRegistry {
 
   async execute(call: LlmToolCall, context: ToolContext): Promise<ToolExecution> {
     const startedAt = this.deps.clock.nowMs();
-    const finish = (result: ToolResult<unknown>): ToolExecution => ({
-      callId: call.id,
-      name: call.name,
-      result,
-      durationMs: this.deps.clock.nowMs() - startedAt,
-    });
+
+    const finish = (result: ToolResult<unknown>): ToolExecution => {
+      const durationMs = this.deps.clock.nowMs() - startedAt;
+
+      /*
+       * Un solo sitio donde se mide, y por eso va dentro de `finish`: una
+       * ejecución puede terminar por cinco caminos —herramienta inexistente,
+       * argumentos inválidos, resultado, excepción o tiempo agotado— y todos
+       * pasan por aquí. Instrumentar cada `return` sería garantizar que el
+       * sexto camino que alguien añada se quede sin medir.
+       *
+       * El desenlace es el CÓDIGO del error, nunca su mensaje: los códigos son
+       * un conjunto cerrado y los mensajes no (D64).
+       */
+      this.deps.metrics.toolCalls.inc({
+        tool: call.name,
+        outcome: result.ok ? "ok" : result.code,
+      });
+      this.deps.metrics.toolDuration.observe(durationMs / 1000, { tool: call.name });
+
+      return { callId: call.id, name: call.name, result, durationMs };
+    };
 
     const tool = this.tools.get(call.name);
     if (!tool) {

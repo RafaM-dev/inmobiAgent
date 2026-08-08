@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppCradle, AppModule } from "./container";
 import { registerErrorHandler } from "./http/error-handler";
+import { registerMetrics } from "./http/metrics.plugin";
 import { registerRequestContext } from "./http/request-context.plugin";
 import { registerSessionSupport } from "./http/session.plugin";
 import { registerHealthRoutes } from "./routes/health.route";
@@ -40,9 +41,20 @@ export const createServer = async (
   await app.register(rateLimit, {
     max: 300,
     timeWindow: "1 minute",
-    // Los webhooks de canal tienen su propio límite, mucho más alto: los
-    // proveedores hacen ráfagas legítimas.
+    /*
+     * Los webhooks de canal se saltan el límite por IP porque este cuenta por
+     * IP, y por la IP de un proveedor entran los mensajes de TODAS las
+     * inmobiliarias: cortar aquí castigaría a las demás por el bucle de una.
+     * Su límite es por inmobiliaria y vive en `ReceiveInboundMessage` (D60).
+     */
     allowList: (request) => request.url.startsWith("/webhooks/"),
+  });
+
+  registerMetrics(app, {
+    registry: cradle.metricsRegistry,
+    metrics: cradle.appMetrics,
+    config,
+    logger: logger.child({ component: "metrics" }),
   });
 
   await registerSessionSupport(app);

@@ -664,6 +664,50 @@ Se dispara `HandoffRequested` cuando:
 
 ---
 
+## 12 bis. Observabilidad
+
+Tres capas que responden preguntas distintas, y confundirlas es el error caro:
+
+| Capa | Pregunta que responde | Dónde vive |
+|---|---|---|
+| **Métricas** | ¿Cuánto entra, cuánto tarda, cuánto falla, cuánto se acumula? | `GET /metrics` |
+| **Logs** | ¿Qué le pasó a ESTA conversación de ESTA inmobiliaria? | `correlationId` + `tenantId` |
+| **Traza del turno** | ¿Qué hizo el agente paso a paso, y qué costó? | `agent_runs` · `agent_run_steps` |
+
+La tercera es la que suele faltar en otros productos y aquí existe desde F2: cada
+turno guarda sus pasos con argumentos, duración, modelo y coste. Por eso las
+métricas **no** necesitan trazas distribuidas para explicar un turno lento — el
+detalle ya está en la base, y con más contexto de negocio del que daría un span.
+
+### Qué se mide
+
+```
+Tráfico     inbound_messages_total{channel,outcome}
+            http_requests_total{method,route,status}
+Servicio    agent_turns_total{status}          COMPLETED · ESCALATED · SKIPPED · FAILED
+            agent_turns_blocked_total{reason}  spend_limit · rate_limit
+Latencia    http_request_duration_seconds · llm_request_duration_seconds
+            agent_turn_duration_seconds · agent_tool_duration_seconds
+Coste       agent_tokens_total{kind} · agent_cost_usd_total{provider}
+Saturación  outbox_lag_seconds   ← la señal temprana: si sube, hay clientes esperando
+Salud       outbox_dead_lettered_total  ← distinto de cero se investiga siempre
+Contexto    build_info{version,environment,llm_provider,embedding_provider}
+```
+
+`outbox_lag_seconds` se mide desde que el evento se **encoló**, no desde que se
+reservó. Un evento que estuvo cuatro minutos en la cola y se entrega en dos
+milisegundos no es una entrega rápida: es una cola que no da abasto.
+
+### La regla que sostiene todo esto
+
+**Ninguna etiqueta lleva un identificador** (D64). Ni tenant, ni conversación, ni
+contacto, ni la URL con el id dentro, ni el mensaje de un error. Cada
+combinación de etiquetas es una serie que el sistema de monitorización guarda
+para siempre. El registro corta a 2 000 series por métrica y avisa en el log,
+para que una etiqueta mal elegida se note como un aviso y no como una fuga.
+
+---
+
 ## 13. Roadmap de implementación
 
 Cada fase termina con: tests verdes, demo funcionando **sin API keys**, y documentación actualizada.
@@ -679,7 +723,7 @@ Cada fase termina con: tests verdes, demo funcionando **sin API keys**, y docume
 | **F6 — Canal WhatsApp** ✅ | Adaptador Cloud API: webhook firmado (HMAC sobre el cuerpo crudo), reparto del payload por número, mapeadores puros de entrada y salida, degradación de botones, credenciales cifradas por cuenta, acuses de entrega correlacionados. | ✅ Un webhook firmado entra por la API y recorre catálogo, agenda y conocimiento **sin tocar un solo caso de uso**; sin firma se rechaza con 403. Verificado contra un doble de la Graph API. Pendiente de una cuenta real: plantillas y media (§18.3). 381 tests. |
 | **F7 — Back-office React** ✅ | Sesiones opacas con cookie `httpOnly` y guardia que fija el `TenantContext`, API del panel, aplicación React 19 + Vite, inbox en vivo (SSE) con toma de control humano, leads, agenda, base de conocimiento (subir, reindexar, borrar), configuración del agente y **simulador**. Contratos Zod compartidos entre API y web. | ✅ Un asesor opera todo el producto desde el navegador: lee lo que vio el cliente **en bloques**, toma el control, devuelve la conversación al agente, sube un documento y lo ve indexarse, cambia el tono y prueba el resultado en el simulador —que habla por la **misma ruta pública que un cliente**—. Sin token en `localStorage` y sin API keys. 414 tests, 0 violaciones de arquitectura. |
 | **F8 — Providers reales** ✅ | Adaptadores de Anthropic (Messages API) y del formato Chat Completions —que sirve para OpenAI, Ollama y todo lo compatible—. Traducción en funciones puras y testeadas, coste estimado por turno, fallo al arrancar si falta una credencial. La suite de contrato corre contra los proveedores de verdad, y se salta sola cuando no hay clave. | ✅ `LLM_PROVIDER=anthropic` (u `openai`, u `ollama`) y **nada más cambia**: ni un caso de uso, ni una política, ni una herramienta. Sin `LLM_PROVIDER`, el producto sigue funcionando entero en modo demo sin ninguna clave. 436 tests, 0 violaciones de arquitectura. |
-| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Límites de ritmo** en dos ámbitos —mensajes por inmobiliaria en la puerta de los canales, turnos por contacto en el agente— sobre un cubo de fichas puro. **Pendiente:** OpenTelemetry, backups, dashboards, evaluación automática de calidad. | SLOs definidos y medidos; runbook de incidentes. |
+| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Límites de ritmo** en dos ámbitos —mensajes por inmobiliaria en la puerta de los canales, turnos por contacto en el agente— sobre un cubo de fichas puro. **Métricas** en `GET /metrics` (formato Prometheus) detrás de un puerto: tráfico, latencias, turnos por desenlace, coste y retraso del outbox, sin un solo identificador en las etiquetas. **Pendiente:** exportador OTLP (necesita un colector con el que probarlo), backups, dashboards, runbook, evaluación automática de calidad. | SLOs definidos y medidos; runbook de incidentes. |
 | **F10 — Escala** | Canales adicionales, memoria semántica, A/B de prompts, colas Redis, réplicas de lectura. | Extraer un módulo a servicio propio sin reescribir lógica. |
 
 ### Orden de implementación consciente
@@ -832,9 +876,14 @@ Pasar a producción = cambiar variables de entorno. Ni un import distinto en el 
 | D60 | **El límite de entrada NO puede vivir en el servidor HTTP.** El límite global de Fastify cuenta por IP, y por la IP de Meta entran los mensajes de TODAS las inmobiliarias: cortar ahí castigaría a las demás por el bucle de una. El tenant solo se conoce después de resolver la cuenta de canal, así que la comprobación va en `ReceiveInboundMessage`. Y **el lote cuesta lo que trae**: si un webhook con cincuenta mensajes contara igual que uno con uno, agrupar sería la forma trivial de saltárselo, y los proveedores agrupan de serie. Un lote mayor que el cubo se recorta al cubo en vez de ser impagable — si no, el proveedor reintentaría para siempre y ninguno de sus mensajes entraría jamás. | ✅ Cerrada | 2026-08-08 |
 | D61 | **Superar el límite de entrada devuelve 429 con `Retry-After`; superar el de turnos omite el turno y avisa una sola vez.** Son dos degradaciones distintas porque son dos problemas distintos. En la entrada, el 429 hace que el proveedor reintente: la conversación se aplaza, no se rompe. En el turno, los mensajes del cliente YA están guardados y la conversación sigue abierta, así que dejar de generar no pierde nada; escalar a una persona —como sí hace el tope de gasto, donde el problema es de la inmobiliaria— convertiría el abuso de un solo número en una forma de inundar el buzón del equipo. El aviso sale de su propio cubo de una ficha cada diez minutos: repetirlo en cada mensaje bloqueado sería duplicar la inundación por el otro lado, y en WhatsApp además pagar por hacerlo. | ✅ Cerrada | 2026-08-08 |
 | D62 | **Si el limitador falla, se deja pasar.** Misma regla que el contador de gasto: no poder medir el ritmo es un problema nuestro, y convertirlo en clientes sin respuesta sería un problema mucho mayor. Una protección no puede ser más dañina que aquello de lo que protege. | ✅ Cerrada | 2026-08-08 |
+| D63 | **Métricas primero, trazas después — y el hueco real no eran las trazas.** El roadmap decía "OpenTelemetry", pero el detalle de un turno YA está persistido: `agent_runs` y `agent_run_steps` guardan cada paso con su duración, su modelo y su coste, que para este producto es mejor que un span genérico. Lo que no existía era lo operativo: tasas, latencias, ratio de error, saturación. Y un exportador OTLP que no se puede verificar contra ningún colector sería la trampa de D55 otra vez — parece correcto y no hace nada. Se construye un registro propio (treinta líneas de formato bien especificado) detrás de un puerto `Metrics`, y el exportador OTLP entra como adaptador el día que haya colector con el que probarlo. | ✅ Cerrada | 2026-08-08 |
+| D64 | **Ninguna etiqueta de métrica lleva un identificador.** Ni `tenantId`, ni `conversationId`, ni `contactId`, ni `correlationId`, ni la URL con el id dentro —se etiqueta con el PATRÓN de ruta— ni el mensaje de un error —se etiqueta con su código—. Cada combinación distinta de etiquetas es una serie temporal que el sistema de monitorización guarda para siempre: con cientos de inmobiliarias, etiquetar por tenant convierte un panel en una factura. El detalle por inmobiliaria vive donde debe: exacto y transaccional en `tenant_usage_periods`, y en los logs, que sí llevan `tenantId`. **Las métricas responden "cuánto y cómo de rápido"; los logs responden "a quién".** El registro corta a 2 000 series por métrica y avisa, para que una etiqueta mal elegida salga en el log en vez de crecer toda la noche. | ✅ Cerrada | 2026-08-08 |
+| D65 | **Un solo catálogo de métricas, no una por módulo.** `app-metrics.ts` se lee como la respuesta a "¿qué vigilamos?". Cuando cada sitio declara las suyas, en seis meses hay tres formas de contar lo mismo con tres nombres parecidos y ningún panel que sume bien. Y se instrumenta en los puntos de paso obligados —un hook de Fastify, un decorador del proveedor, el `finish` del registro de herramientas, una envoltura del turno— nunca en cada `return`: así el camino que alguien añada mañana ya está medido. | ✅ Cerrada | 2026-08-08 |
+| D66 | **`GET /metrics` falla cerrado en producción.** El endpoint publica la versión desplegada, el gasto acumulado y el mapa de rutas: es reconocimiento gratis. Sin `METRICS_TOKEN` en producción la ruta NO se registra y el arranque lo avisa; con token, quien no lo trae recibe **404 y no 401**, porque un 401 confirma que el endpoint existe. En desarrollo está abierta, que es lo que hace útil un `curl`. | ✅ Cerrada | 2026-08-08 |
 
 ## 18. Decisiones abiertas
 
 1. ~~Auth del back-office: sesión propia con cookies httpOnly vs proveedor externo~~ → **cerrada en F7 (D34)**: sesión opaca en servidor, cookie `httpOnly`, revocable al instante.
+4. **Exportador OTLP.** El puerto `Metrics` ya existe y el registro Prometheus va detrás de él, así que el exportador es un adaptador más en el composition root — pueden convivir los dos. No se escribe todavía por la misma razón que las plantillas de WhatsApp: no hay colector contra el que probarlo, y código de observabilidad sin verificar es la peor clase de código de observabilidad (D63). Se cierra cuando haya un colector en el `docker compose` o en un despliegue.
 3. **Plantillas y media de WhatsApp.** Ambas exigen una cuenta real: las plantillas hay que darlas de alta y que Meta las apruebe, y la media exige una segunda llamada a la Graph API para convertir un `id` en URL temporal. El adaptador las rechaza de forma explícita en vez de fingir que funcionan. Se cierran cuando haya un número verificado.
 2. ~~Almacenamiento de archivos para `knowledge` y media~~ → **cerrada en F5 (D27)**: puerto `FileStorage` con adaptador local; S3-compatible cuando exista despliegue.

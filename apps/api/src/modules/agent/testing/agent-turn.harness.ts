@@ -6,6 +6,8 @@ import { NoopLogger } from "../../../platform/logging/logger";
 import { InMemoryRateLimiter } from "../../../platform/rate-limit/in-memory-rate-limiter";
 import type { RateLimiter } from "../../../platform/rate-limit/rate-limiter";
 import type { Quota, RateLimitDecision } from "../../../platform/rate-limit/token-bucket";
+import { createAppMetrics } from "../../../platform/telemetry/app-metrics";
+import { PrometheusMetrics } from "../../../platform/telemetry/prometheus-metrics";
 import { ok, okVoid, type Result } from "../../../platform/result/result";
 import { blocksToText, defaultCapabilities, type ReplyBlock } from "../../channels";
 import { createInMemoryCatalog, type InMemoryCatalog } from "../../catalog/testing/in-memory-catalog";
@@ -57,6 +59,7 @@ import { RunAgentTurnUseCase } from "../application/use-cases/run-agent-turn.use
 import type { AgentRun } from "../domain/entities/agent-run";
 import type { AgentRunRepository } from "../domain/repositories/agent-run.repository";
 import { RuleBasedSlotExtractor } from "../infrastructure/extraction/rule-based-slot-extractor";
+import { MeteredLLMProvider } from "../infrastructure/llm/metered-llm-provider";
 import { MockLLMProvider } from "../infrastructure/llm/mock/mock-llm-provider";
 import { InMemoryUsageLedger } from "./in-memory-usage-ledger";
 
@@ -231,6 +234,15 @@ export interface Harness {
   /** Expuesto para poder mover el tiempo: los límites de ritmo se reponen. */
   readonly clock: FixedClock;
   readonly rateLimiter: ControllableRateLimiter;
+  /**
+   * Registro de métricas REAL, no un doble.
+   *
+   * Así un test puede leer lo que se expondría de verdad. Un doble que solo
+   * cuenta llamadas demostraría que el código llama al contador, no que lo que
+   * sale por `/metrics` sea correcto — y ese es justo el error que nadie
+   * descubre hasta que mira una gráfica vacía.
+   */
+  readonly metrics: PrometheusMetrics;
 }
 
 export const createHarness = (options: {
@@ -269,7 +281,10 @@ export const createHarness = (options: {
 
   const knowledge = createInMemoryKnowledge({ events, clock, logger });
 
-  const tools = new ToolRegistry({ logger, clock });
+  const registry = new PrometheusMetrics({ logger });
+  const metrics = createAppMetrics(registry);
+
+  const tools = new ToolRegistry({ logger, clock, metrics });
   tools.register(createSavePreferencesTool({ conversations }));
   tools.register(createRequestHumanTool({ handoff }));
   tools.register(createSearchPropertiesTool({ catalog: catalog.service, conversations }));
@@ -287,7 +302,17 @@ export const createHarness = (options: {
   const runTurn = new RunAgentTurnUseCase({
     conversations,
     tenants,
-    llm: options.llm ?? new MockLLMProvider({ tokens }),
+    /*
+     * Envuelto en el medidor igual que en el punto de composición. Si el arnés
+     * montara el proveedor a pelo, los tests correrían contra una tubería que
+     * no existe en producción — y precisamente la instrumentación se quedaría
+     * sin probar.
+     */
+    llm: new MeteredLLMProvider({
+      inner: options.llm ?? new MockLLMProvider({ tokens }),
+      metrics,
+      clock,
+    }),
     tools,
     contextBuilder: new ContextBuilder({ prompts, tokens }),
     slotExtractor: new RuleBasedSlotExtractor(),
@@ -312,6 +337,7 @@ export const createHarness = (options: {
     // Los mismos valores que trae el producto: si un cambio en el límite
     // rompiera un escenario realista, se quiere saber aquí y no en producción.
     turnQuota: options.turnQuota ?? { burst: 20, perMinute: 12 },
+    metrics,
     capabilitiesOf: () => Promise.resolve(defaultCapabilities({ maxTextLength: 1200 })),
   });
 
@@ -327,5 +353,6 @@ export const createHarness = (options: {
     usage,
     clock,
     rateLimiter,
+    metrics: registry,
   };
 };

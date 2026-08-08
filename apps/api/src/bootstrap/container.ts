@@ -15,6 +15,8 @@ import { createPinoRoot, PinoLogger } from "../platform/logging/pino-logger";
 import { InMemoryRateLimiter } from "../platform/rate-limit/in-memory-rate-limiter";
 import type { RateLimiter } from "../platform/rate-limit/rate-limiter";
 import type { FileStorage } from "../platform/storage/file-storage";
+import { createAppMetrics } from "../platform/telemetry/app-metrics";
+import { PrometheusMetrics } from "../platform/telemetry/prometheus-metrics";
 import { LocalFileStorage } from "../platform/storage/local-file-storage";
 import type { FastifyInstance } from "fastify";
 import type { AgentCradle } from "../modules/agent";
@@ -69,6 +71,19 @@ export const buildContainer = (config: AppConfig): AwilixContainer<AppCradle> =>
     config: asValue(config),
 
     logger: asFunction((c: AppCradle) => new PinoLogger(createPinoRoot(c.config))).singleton(),
+
+    /**
+     * ÚNICO punto donde se elige dónde van las métricas.
+     *
+     * Hoy, un registro en proceso que se sirve en formato Prometheus. El día que
+     * haya un colector, un adaptador OTLP detrás del mismo puerto `Metrics`
+     * —o los dos a la vez—: ningún caso de uso se entera.
+     */
+    metricsRegistry: asFunction(
+      (c: AppCradle) =>
+        new PrometheusMetrics({ logger: c.logger.child({ component: "metrics" }) }),
+    ).singleton(),
+    appMetrics: asFunction((c: AppCradle) => createAppMetrics(c.metricsRegistry)).singleton(),
     clock: asFunction(() => new SystemClock()).singleton(),
     ids: asFunction(() => new UuidV7Generator()).singleton(),
 
@@ -130,6 +145,7 @@ export const buildContainer = (config: AppConfig): AwilixContainer<AppCradle> =>
           bus: c.eventBus,
           clock: c.clock,
           logger: c.logger.child({ component: "outbox-relay" }),
+          metrics: c.appMetrics,
         }),
     ).singleton(),
   });

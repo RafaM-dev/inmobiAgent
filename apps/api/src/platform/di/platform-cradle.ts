@@ -10,6 +10,8 @@ import type { IdGenerator } from "../ids/id-generator";
 import type { Logger } from "../logging/logger";
 import type { RateLimiter } from "../rate-limit/rate-limiter";
 import type { FileStorage } from "../storage/file-storage";
+import type { AppMetrics } from "../telemetry/app-metrics";
+import type { PrometheusMetrics } from "../telemetry/prometheus-metrics";
 
 /**
  * Servicios transversales disponibles para todos los módulos.
@@ -31,6 +33,15 @@ export interface PlatformCradle {
   fileStorage: FileStorage;
   /** Ritmo tolerado por clave: hoy en memoria, mañana en Redis (D58). */
   rateLimiter: RateLimiter;
+
+  /**
+   * Registro de métricas. Solo el composition root y el endpoint lo tocan.
+   *
+   * Los módulos usan `appMetrics`, que es el catálogo tipado; nadie declara
+   * métricas por su cuenta (D65).
+   */
+  metricsRegistry: PrometheusMetrics;
+  appMetrics: AppMetrics;
 
   outboxStore: OutboxStore;
   idempotencyStore: IdempotencyStore;

@@ -51,6 +51,7 @@ import { registerUsageRoutes } from "./interface/http/usage.routes";
 import type { AgentRunRepository } from "./domain/repositories/agent-run.repository";
 import { RuleBasedSlotExtractor } from "./infrastructure/extraction/rule-based-slot-extractor";
 import { AnthropicLLMProvider } from "./infrastructure/llm/anthropic/anthropic-llm-provider";
+import { MeteredLLMProvider } from "./infrastructure/llm/metered-llm-provider";
 import { MockLLMProvider } from "./infrastructure/llm/mock/mock-llm-provider";
 import { OpenAiCompatibleLLMProvider } from "./infrastructure/llm/openai/openai-llm-provider";
 import { PrismaAgentRunRepository } from "./infrastructure/persistence/prisma/prisma-agent-run.repository";
@@ -125,6 +126,16 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
         const logger = c.logger.child({ module: "agent", component: "llm" });
 
         /**
+         * Todo proveedor sale medido de aquí.
+         *
+         * Envolver en el `switch` y no en cada `case` es lo que hace que un
+         * adaptador nuevo esté instrumentado antes de escribirse: no hay nada
+         * que recordar.
+         */
+        const metered = (inner: LLMProvider): LLMProvider =>
+          new MeteredLLMProvider({ inner, metrics: c.appMetrics, clock: c.clock });
+
+        /**
          * Falta una credencial: se falla AL ARRANCAR, no en el primer turno.
          *
          * Un proceso que levanta con `LLM_PROVIDER=anthropic` y sin clave
@@ -143,10 +154,10 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
 
         switch (c.config.providers.llm) {
           case "mock":
-            return new MockLLMProvider({ tokens: c.tokenCounter });
+            return metered(new MockLLMProvider({ tokens: c.tokenCounter }));
 
           case "anthropic":
-            return new AnthropicLLMProvider({
+            return metered(new AnthropicLLMProvider({
               options: {
                 apiKey: requireCredential(credentials.anthropicApiKey, "ANTHROPIC_API_KEY"),
                 ...(models.anthropic ? { model: models.anthropic } : {}),
@@ -155,10 +166,10 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
                 maxRetries: llmRuntime.maxRetries,
               },
               logger,
-            });
+            }));
 
           case "openai":
-            return new OpenAiCompatibleLLMProvider({
+            return metered(new OpenAiCompatibleLLMProvider({
               options: {
                 id: "openai",
                 apiKey: requireCredential(credentials.openaiApiKey, "OPENAI_API_KEY"),
@@ -172,10 +183,10 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
                 maxRetries: llmRuntime.maxRetries,
               },
               logger,
-            });
+            }));
 
           case "ollama":
-            return new OpenAiCompatibleLLMProvider({
+            return metered(new OpenAiCompatibleLLMProvider({
               options: {
                 id: "ollama",
                 /*
@@ -191,7 +202,7 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
                 maxRetries: llmRuntime.maxRetries,
               },
               logger,
-            });
+            }));
 
           default:
             throw new Error(
@@ -245,6 +256,7 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
         const registry = new ToolRegistry({
           logger: c.logger.child({ module: "agent", component: "tools" }),
           clock: c.clock,
+          metrics: c.appMetrics,
         });
 
         registry.register(createSavePreferencesTool({ conversations: c.conversationService }));
@@ -311,6 +323,7 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
             defaultMonthlyBudgetUsd: c.config.agent.monthlyBudgetUsd,
             rateLimiter: c.rateLimiter,
             turnQuota: c.config.rateLimit.contactTurns,
+            metrics: c.appMetrics,
             capabilitiesOf: async (channelAccountId: string) => {
               const found = await c.getChannelCapabilities.execute(channelAccountId);
               // Si la cuenta desapareció, se asume el canal más pobre posible:
