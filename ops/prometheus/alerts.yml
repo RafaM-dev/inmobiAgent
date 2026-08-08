@@ -1,0 +1,152 @@
+# Reglas de alerta de AgentInmobi.
+#
+# Regla de oro: una alerta que no lleva a una acción concreta es ruido, y el
+# ruido enseña a ignorar las alertas de verdad. Cada una de estas tiene un
+# procedimiento escrito en `docs/01-RUNBOOK.md`, enlazado en `runbook_url`.
+#
+# Los `for` no son decorativos: separan un pico de un problema. Un minuto de
+# latencia alta durante un despliegue no es una incidencia; quince, sí.
+#
+# Uso:
+#   scrape_configs:
+#     - job_name: agentinmobi
+#       metrics_path: /metrics
+#       authorization: { type: Bearer, credentials: "$METRICS_TOKEN" }
+#       static_configs: [{ targets: ["api:3000"] }]
+#   rule_files: ["alerts.yml"]
+
+groups:
+  - name: agentinmobi-disponibilidad
+    interval: 30s
+    rules:
+      - alert: ApiCaida
+        expr: up{job="agentinmobi"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "La API no responde al recolector"
+          description: >-
+            Ningún proceso está exponiendo métricas. Si es un despliegue, se
+            resuelve solo en un minuto; si no, hay clientes escribiendo por
+            WhatsApp sin que nadie los atienda.
+          runbook_url: "docs/01-RUNBOOK.md#apicaida"
+
+      - alert: TasaDeErrorHttpAlta
+        expr: |
+          sum(rate(agentinmobi_http_requests_total{status="5xx"}[5m]))
+            /
+          sum(rate(agentinmobi_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Más del 5 % de las peticiones fallan con 5xx"
+          description: "Ratio actual: {{ $value | humanizePercentage }}."
+          runbook_url: "docs/01-RUNBOOK.md#tasadeerrorhttpalta"
+
+      - alert: SinTraficoEntrante
+        expr: sum(rate(agentinmobi_inbound_messages_total[15m])) == 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Una hora sin un solo mensaje entrante"
+          description: >-
+            Puede ser normal de madrugada. Fuera de eso suele significar que el
+            webhook del proveedor dejó de apuntar aquí, y el síntoma es el
+            mismo que si no hubiera clientes: silencio.
+          runbook_url: "docs/01-RUNBOOK.md#sintraficoentrante"
+
+  - name: agentinmobi-agente
+    interval: 30s
+    rules:
+      - alert: TurnosFallando
+        expr: |
+          sum(rate(agentinmobi_agent_turns_total{status="FAILED"}[10m]))
+            /
+          sum(rate(agentinmobi_agent_turns_total[10m])) > 0.05
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Más del 5 % de los turnos del agente revientan"
+          description: "Cada uno es un cliente que escribió y no recibió respuesta."
+          runbook_url: "docs/01-RUNBOOK.md#turnosfallando"
+
+      - alert: AgenteLento
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(agentinmobi_agent_turn_duration_seconds_bucket[10m]))
+          ) > 8
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "El p95 del turno supera los 8 s"
+          description: >-
+            Por WhatsApp, ocho segundos de silencio es cuando el cliente
+            escribe "hola?" — y eso genera otro turno.
+          runbook_url: "docs/01-RUNBOOK.md#agentelento"
+
+      - alert: ProveedorDeIaFallando
+        expr: |
+          sum(rate(agentinmobi_llm_requests_total{outcome!="ok"}[5m]))
+            /
+          sum(rate(agentinmobi_llm_requests_total[5m])) > 0.2
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Una de cada cinco llamadas al modelo falla"
+          description: >-
+            El agente degrada a un asesor humano en cada fallo, así que la cola
+            de atención se está llenando ahora mismo.
+          runbook_url: "docs/01-RUNBOOK.md#proveedordeiafallando"
+
+      - alert: CosteDisparado
+        expr: sum(increase(agentinmobi_agent_cost_usd_total[1h])) > 20
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Más de 20 USD de IA en una hora"
+          description: >-
+            Ajusta el umbral a la escala real del despliegue. Un salto brusco
+            suele ser un bucle de mensajes, no un buen día comercial.
+          runbook_url: "docs/01-RUNBOOK.md#costedisparado"
+
+      - alert: InmobiliariasSinPresupuesto
+        expr: increase(agentinmobi_agent_turns_blocked_total{reason="spend_limit"}[1h]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hay turnos bloqueados por tope de gasto"
+          description: >-
+            Los clientes de esa inmobiliaria están pasando a un asesor en vez
+            de ser atendidos por el agente. Es un problema comercial, no técnico.
+          runbook_url: "docs/01-RUNBOOK.md#inmobiliariassinpresupuesto"
+
+  - name: agentinmobi-datos
+    interval: 30s
+    rules:
+      - alert: EventosPerdidos
+        expr: increase(agentinmobi_outbox_dead_lettered_total[15m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "El outbox ha descartado eventos"
+          description: >-
+            Un evento en dead-letter es trabajo que el sistema NO va a hacer:
+            un lead sin notificar, un recordatorio que no sale. No se recupera
+            solo. Cualquier valor distinto de cero se investiga.
+          runbook_url: "docs/01-RUNBOOK.md#eventosperdidos"
+
+      - alert: OutboxAtascado
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(agentinmobi_outbox_lag_seconds_bucket[5m]))
+          ) > 30
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "El p95 del retraso del outbox supera los 30 s"
+          description: >-
+            La señal TEMPRANA: cuando esto sube, los clientes ya están
+            esperando aunque las peticiones sigan respondiendo con 202.
+          runbook_url: "docs/01-RUNBOOK.md#outboxatascado"

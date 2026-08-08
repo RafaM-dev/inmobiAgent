@@ -29,6 +29,8 @@
     "infra:reset": "docker compose down -v && docker compose up -d",
     "db:seed": "pnpm --filter @agentinmobi/api db:seed",
     "db:migrate": "pnpm --filter @agentinmobi/api db:migrate",
+    "db:backup": "pnpm --filter @agentinmobi/api db:backup",
+    "db:verify-restore": "pnpm --filter @agentinmobi/api db:verify-restore",
     "chat": "pnpm --filter @agentinmobi/api chat"
   },
   "pnpm": {

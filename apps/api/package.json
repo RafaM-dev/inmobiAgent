@@ -14,13 +14,16 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "prisma generate",
-    "db:migrate": "pnpm db:provision && prisma migrate dev",
-    "db:deploy": "pnpm db:provision && prisma migrate deploy",
+    "db:migrate": "pnpm db:provision && prisma migrate dev && pnpm db:indexes",
+    "db:deploy": "pnpm db:provision && prisma migrate deploy && pnpm db:indexes",
+    "db:indexes": "tsx --env-file=../../.env scripts/ensure-search-indexes.ts",
     "db:studio": "prisma studio",
     "db:validate": "prisma validate",
     "db:seed": "tsx --env-file=../../.env prisma/seed/seed.ts",
     "chat": "tsx --env-file=../../.env scripts/chat.ts",
-    "db:provision": "tsx --env-file=../../.env scripts/provision-db-role.ts"
+    "db:provision": "tsx --env-file=../../.env scripts/provision-db-role.ts",
+    "db:backup": "tsx --env-file=../../.env scripts/backup.ts",
+    "db:verify-restore": "tsx --env-file=../../.env scripts/verify-restore.ts"
   },
   "dependencies": {
     "@agentinmobi/contracts": "workspace:*",

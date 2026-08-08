@@ -6,6 +6,8 @@ cualquier otro canal mañana.
 
 La arquitectura completa está en **[`docs/00-ARCHITECTURE.md`](docs/00-ARCHITECTURE.md)**.
 Ese documento manda: si el código y el documento discrepan, uno de los dos es un bug.
+Para operar —alertas, incidencias, copias, despliegue— está el
+**[runbook](docs/01-RUNBOOK.md)**.
 
 ---
 
@@ -162,7 +164,7 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-500 tests unitarios con dobles en memoria, y 59 de integración contra Postgres
+500 tests unitarios con dobles en memoria, y 63 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -171,6 +173,14 @@ Los de integración cubren lo que ningún doble puede imitar honestamente: que e
 filtro por inmobiliaria esté de verdad en el SQL, el `unaccent` y el lematizador
 español de Postgres, el `SKIP LOCKED` del outbox, y el HTTP real con su guardia
 de sesión y su manejador de errores.
+
+La verificación de copias (`pnpm db:verify-restore`) encontró dos defectos más en
+su **primera** ejecución, y ninguno de los dos rompía nada: los índices HNSW y GIN
+de la búsqueda habían desaparecido —`prisma migrate dev` los tiró en F7 porque no
+sabe modelarlos— y llevaban tres fases convirtiendo cada búsqueda en un recorrido
+de la tabla entera; y el rol de la aplicación no era dueño de las tablas, así que
+la siguiente migración habría fallado en producción. Los resultados eran correctos
+en ambos casos, que es justo por lo que ningún test los veía.
 
 Las tres primeras suites que se escribieron encontraron tres defectos en código
 que llevaba fases dando por bueno: un `findById` sin ámbito de tenant, una
@@ -190,7 +200,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · backups, dashboards, runbook | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · copias programadas, paneles, evaluación de calidad | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

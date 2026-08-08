@@ -96,6 +96,47 @@ export const provisionAppRole = async (input: {
         : `ALTER ROLE ${ident(role)} LOGIN PASSWORD ${literal(password)} NOSUPERUSER NOBYPASSRLS`,
     );
 
+    /*
+     * Las migraciones corren con ESTE rol, y en PostgreSQL solo el DUEÑO de una
+     * tabla puede alterarla. En una base creada desde cero no hay problema —las
+     * crea él y son suyas—, pero en una que existía ANTES de separar los roles
+     * (D55) son del administrador, y la siguiente migración que toque una tabla
+     * vieja muere con «must be owner of table». Le pasó a la base de desarrollo
+     * de este repositorio.
+     *
+     * Reasignar el dueño NO abre un agujero en el aislamiento, y ese es
+     * justamente el motivo de que las políticas se declaren con **FORCE**: sin
+     * él, el dueño de una tabla se salta su propia RLS. Con él, no. Es la misma
+     * decisión de D54 sosteniendo un caso que entonces no se había visto.
+     */
+    const reassigned = await admin.$executeRawUnsafe(`
+      DO $reassign$
+      DECLARE
+        target text := ${literal(role)};
+        obj record;
+      BEGIN
+        FOR obj IN
+          SELECT c.relname AS name,
+                 CASE c.relkind
+                   WHEN 'r' THEN 'TABLE'
+                   WHEN 'p' THEN 'TABLE'
+                   WHEN 'S' THEN 'SEQUENCE'
+                   WHEN 'v' THEN 'VIEW'
+                   WHEN 'm' THEN 'MATERIALIZED VIEW'
+                 END AS kind
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public'
+             AND c.relkind IN ('r', 'p', 'S', 'v', 'm')
+             AND pg_get_userbyid(c.relowner) <> target
+        LOOP
+          EXECUTE format('ALTER %s public.%I OWNER TO %I', obj.kind, obj.name, target);
+        END LOOP;
+      END
+      $reassign$;
+    `);
+    void reassigned;
+
     for (const statement of [
       `GRANT CONNECT ON DATABASE ${ident(database)} TO ${ident(role)}`,
       `GRANT USAGE, CREATE ON SCHEMA public TO ${ident(role)}`,

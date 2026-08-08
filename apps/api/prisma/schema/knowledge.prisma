@@ -68,8 +68,9 @@ model Document {
 /// El fragmento es la unidad que se recupera y se cita.
 ///
 /// `embedding` y `tsv` son columnas que Prisma no modela: el vector lo escribe
-/// el repositorio con SQL crudo y el `tsvector` lo genera Postgres. Los índices
-/// (HNSW y GIN) se crean en la migración.
+/// el repositorio con SQL crudo y el `tsvector` lo calcula el INSERT. Sus
+/// índices se crean en la migración y se vigilan con un test, porque Prisma
+/// los ha tirado una vez (D67).
 model DocumentChunk {
   id             String                       @id
   tenantId       String                       @map("tenant_id")
@@ -90,5 +91,11 @@ model DocumentChunk {
   @@unique([documentId, ordinal])
   /// La búsqueda solo compara dentro del mismo espacio vectorial.
   @@index([tenantId, embeddingModel])
+  /// Declarado aquí, y no solo en la migración, porque Prisma tira lo que no
+  /// conoce: en F7 se llevó por delante este GIN y el HNSW sin que nadie lo
+  /// pidiera, y las búsquedas siguieron siendo correctas — solo que recorriendo
+  /// la tabla entera. El HNSW no se puede declarar (el lenguaje de esquema no
+  /// tiene ese tipo); lo guardan `db:indexes` y un test (D67).
+  @@index([tsv(ops: raw("tsvector_ops"))], type: Gin)
   @@map("document_chunks")
 }

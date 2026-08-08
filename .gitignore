@@ -29,5 +29,9 @@ apps/api/src/generated/
 # Son datos de la inmobiliaria, no del proyecto.
 .storage/
 
+# Volcados de la base de datos. Contienen datos reales de las inmobiliarias:
+# nunca deben acabar en el repositorio ni en un remoto.
+backups/
+
 # Preferencias locales de la herramienta, no del proyecto
 .claude/settings.local.json
