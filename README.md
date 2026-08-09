@@ -173,6 +173,20 @@ fly secrets set ENCRYPTION_KEY="$(openssl rand -base64 32)"
 fly deploy
 ```
 
+Y para dar de alta la primera inmobiliaria en lo recién desplegado:
+
+```bash
+fly ssh console -C "node /app/apps/api/dist/onboard.js \
+  --slug alfa --nombre 'Alfa Propiedades' \
+  --correo maria@alfa.co --propietario 'María Restrepo'"
+```
+
+**No pide contraseña**: emite un enlace de invitación y lo imprime, y la
+persona la elige en el navegador. Una contraseña por línea de comandos queda en
+el historial del intérprete y en los registros del orquestador. El comando es
+repetible: si la inmobiliaria ya existe vuelve a emitir el enlace, así que
+también sirve para recuperar el acceso cuando alguien se queda fuera.
+
 Para una máquina propia, `docker-compose.prod.yml` levanta la aplicación y su
 base. **`--env-file` no es opcional**: sin él Compose carga el `.env` de
 desarrollo y arrancarías producción con la clave de cifrado de ejemplo.

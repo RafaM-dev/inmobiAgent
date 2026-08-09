@@ -24,9 +24,23 @@ export class LogNotifier implements Notifier {
     this.deps.logger.info("Aviso (sin SMTP configurado: no se ha enviado nada)", {
       to: notification.to,
       subject: notification.subject,
-      body: notification.body,
+      body: redactTokens(notification.body),
     });
 
     return Promise.resolve(ok(undefined));
   }
 }
+
+/**
+ * Tapa los tokens de los enlaces antes de escribirlos.
+ *
+ * Cuando este adaptador solo mandaba avisos de escalado, volcar el cuerpo
+ * entero era inofensivo. Desde que también manda invitaciones y
+ * restablecimientos, ese cuerpo lleva dentro **una credencial que abre una
+ * cuenta** — y los logs se envían fuera, se guardan meses y los lee gente que
+ * no tendría por qué poder entrar en el panel de un cliente.
+ *
+ * El enlace completo sigue llegando a quien hizo la operación: la pantalla de
+ * equipo lo enseña y el comando de alta lo imprime. El log no es el sitio.
+ */
+const redactTokens = (body: string): string => body.replace(/token=[^&\s]+/g, "token=[oculto]");

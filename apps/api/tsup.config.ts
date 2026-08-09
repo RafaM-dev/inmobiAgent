@@ -7,6 +7,10 @@ export default defineConfig({
     // Paso de despliegue: provisionar rol, migrar y recrear índices. Va como
     // entrada propia para que la imagen pueda ejecutarlo sin `tsx` ni fuentes.
     release: "src/bootstrap/release.ts",
+    // Alta de una inmobiliaria en un despliegue real. Va en el bundle porque
+    // `tsx` no existe en la imagen de producción, y sin este comando no habría
+    // forma de entrar en lo que se acaba de desplegar.
+    onboard: "src/bootstrap/onboard.ts",
   },
   format: ["esm"],
   target: "node22",
