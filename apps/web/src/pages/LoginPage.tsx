@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ThemeToggle } from "@/components/theme";
 import { ApiError } from "../api/client";
 import { useSession } from "../auth/session-context";
 
@@ -44,7 +45,16 @@ export const LoginPage = (): ReactNode => {
   };
 
   return (
-    <main className="bg-muted/40 grid min-h-screen place-items-center p-6">
+    <main className="bg-muted/40 relative grid min-h-screen place-items-center p-6">
+      {/*
+       * El selector de tema también aquí, no solo dentro del panel: quien
+       * trabaja de noche se encuentra la pantalla de acceso antes que ninguna
+       * otra, y es la única que vería con el tema equivocado.
+       */}
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-2 text-center">
           <div className="bg-primary text-primary-foreground grid size-10 place-items-center rounded-lg">
