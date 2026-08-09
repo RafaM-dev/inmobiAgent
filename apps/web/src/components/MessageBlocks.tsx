@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
  */
 
 const Card = ({ card }: { card: PropertyCard }): ReactNode => (
-  <div className="bg-card mt-1.5 max-w-sm space-y-1 rounded-md border p-2.5 first:mt-0">
+  <div className="bg-card max-w-sm space-y-1 rounded-md border p-2.5">
     <div className="text-sm leading-snug font-medium">{card.title}</div>
 
     {card.price !== undefined && (
@@ -62,7 +62,13 @@ const Card = ({ card }: { card: PropertyCard }): ReactNode => (
 const Block = ({ block }: { block: ReplyBlockContract }): ReactNode => {
   switch (block.kind) {
     case "text":
-      return <span className="text-sm whitespace-pre-wrap">{block.text}</span>;
+      /*
+       * `<p>` y no `<span>`. Un mensaje puede traer VARIOS bloques de texto —la
+       * respuesta del modelo y, detrás, la cita de la fuente que añade
+       * `search_knowledge`— y con un elemento inline se pintaban pegados:
+       * «…con un asesor?Fuente: Reglamento de convivencia».
+       */
+      return <p className="text-sm whitespace-pre-wrap">{block.text}</p>;
 
     case "property_card":
       return <Card card={block.card} />;
@@ -79,7 +85,7 @@ const Block = ({ block }: { block: ReplyBlockContract }): ReactNode => {
 
     case "quick_replies":
       return (
-        <div className="mt-1.5 space-y-1.5">
+        <div className="space-y-1.5">
           <div className="text-sm">{block.prompt}</div>
           {/*
            * Se ven como botones pero NO lo son: en el panel es una copia de lo
@@ -156,9 +162,15 @@ export const MessageBlocks = ({
 }: {
   blocks: readonly ReplyBlockContract[];
 }): ReactNode => (
-  <>
+  /*
+   * La separación entre bloques vive AQUÍ y no dentro de cada uno. Cuando cada
+   * bloque se ponía su propio margen, bastaba con que uno nuevo se olvidara del
+   * suyo para que apareciera pegado al anterior — que es justo lo que pasó con
+   * la cita de la fuente.
+   */
+  <div className="flex flex-col gap-1.5">
     {blocks.map((block, index) => (
       <Block key={`${block.kind}-${String(index)}`} block={block} />
     ))}
-  </>
+  </div>
 );

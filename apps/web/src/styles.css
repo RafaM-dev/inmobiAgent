@@ -10,15 +10,15 @@
  * no es estética: son componentes accesibles de verdad —foco, teclado, roles
  * ARIA, cierre por Escape— que escribir a mano cuesta meses y sale mal.
  *
- * Dos ajustes sobre el tema por defecto, y los dos por el mismo motivo: **un
- * asesor mira esta pantalla ocho horas seguidas**.
+ * Dos ajustes sobre el tema por defecto:
  *
- *  · **Densidad alta.** El radio baja de 0.625rem a 0.5rem y el tipo base a
- *    13px. Necesita ver treinta conversaciones a la vez, no diez tarjetas
- *    espaciosas.
+ *  · **Esquinas algo menos redondeadas** (0.5rem en vez de 0.625rem). Un asesor
+ *    mira esta pantalla ocho horas: conviene que parezca una herramienta.
  *  · **Azul de marca, no gris.** El tema por defecto de shadcn es neutro; aquí
  *    lo primario es la acción, y en una herramienta de trabajo la acción tiene
  *    que distinguirse de un borde a un metro de distancia.
+ *
+ * El tamaño de letra NO se toca: ver la nota en `@layer base`.
  *
  * Los colores de banda de lead (caliente/tibio/frío) son tokens del sistema y
  * no clases sueltas: aparecen en la tabla de leads, en el inbox y mañana en un
@@ -177,10 +177,21 @@
     @apply border-border outline-ring/50;
   }
 
+  /*
+   * SIN `font-size` en la raíz, a propósito.
+   *
+   * Aquí hubo un 13px buscando densidad y fue un error. Un tamaño fijo en la
+   * raíz PISA la preferencia del navegador: quien tiene el suyo en 20px porque
+   * lo necesita, recibía 13px igualmente. Eso no es densidad, es quitarle a
+   * alguien un ajuste de accesibilidad que ya había hecho.
+   *
+   * Sin la declaración, la base es la del navegador (16px normalmente) y toda
+   * la escala de shadcn —que está diseñada para ese valor— recupera sus
+   * proporciones. La densidad, si vuelve a hacer falta, se ajusta en los
+   * componentes que la necesiten, no encogiendo el sistema entero.
+   */
   html {
     @apply font-sans;
-    /* 13px de base: la densidad que pide una herramienta de trabajo. */
-    font-size: 13px;
   }
 
   body {
