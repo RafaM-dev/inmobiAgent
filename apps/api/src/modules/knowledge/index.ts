@@ -29,6 +29,7 @@ import type {
   KnowledgeCollectionRepository,
 } from "./domain/repositories/knowledge.repositories";
 import { MockEmbeddingProvider } from "./infrastructure/embeddings/mock/mock-embedding-provider";
+import { OpenAiCompatibleEmbeddingProvider } from "./infrastructure/embeddings/openai/openai-embedding-provider";
 import { PlainTextExtractor } from "./infrastructure/extraction/plain-text.extractor";
 import {
   PrismaDocumentChunkRepository,
@@ -129,14 +130,53 @@ export const knowledgeModule: ModuleRegistration<Cradle, FastifyInstance> = {
        * que reindexar, y para eso se guarda el original de cada documento.
        */
       embeddingProvider: asFunction((c: Cradle): EmbeddingProvider => {
+        const { embeddings, credentials } = c.config.providers;
+        const logger = c.logger.child({ module: "knowledge" });
+
         switch (c.config.providers.embedding) {
           case "mock":
             return new MockEmbeddingProvider();
-          default:
-            throw new Error(
-              `El proveedor de embeddings "${c.config.providers.embedding}" llega en F8. ` +
-                "Usa EMBEDDING_PROVIDER=mock para el modo demo.",
-            );
+
+          case "openai":
+            return new OpenAiCompatibleEmbeddingProvider({
+              options: {
+                id: "openai",
+                // La configuración ya garantiza la clave si se elige openai.
+                apiKey: credentials.openaiApiKey ?? "",
+                model: embeddings.openaiModel,
+                /*
+                 * Se pide la dimensión explícitamente: los `text-embedding-3`
+                 * admiten recortar el vector, así que el modelo grande cabe en
+                 * la misma columna sin migrar nada.
+                 */
+                requestDimensions: true,
+                batchSize: embeddings.batchSize,
+                timeoutMs: embeddings.timeoutMs,
+              },
+              logger,
+            });
+
+          case "ollama":
+            return new OpenAiCompatibleEmbeddingProvider({
+              options: {
+                // Ollama expone el endpoint de OpenAI bajo `/v1` y no pide
+                // clave; el SDK exige una cadena, así que se le da uno inerte.
+                id: "ollama",
+                apiKey: "ollama",
+                baseUrl: `${credentials.ollamaBaseUrl.replace(/\/+$/, "")}/v1`,
+                model: embeddings.ollamaModel,
+                /*
+                 * NO se pide la dimensión: es un parámetro de OpenAI y un
+                 * servicio compatible puede rechazarlo. Si el modelo local no
+                 * produce 1536, el adaptador lo dice al primer intento en vez
+                 * de guardar vectores que no se pueden comparar.
+                 */
+                requestDimensions: false,
+                batchSize: embeddings.batchSize,
+                timeoutMs: embeddings.timeoutMs,
+              },
+              logger,
+            });
         }
       }).singleton(),
 

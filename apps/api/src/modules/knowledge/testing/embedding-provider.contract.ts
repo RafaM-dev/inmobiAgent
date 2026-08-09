@@ -16,6 +16,22 @@ import { cosineSimilarity, type EmbeddingProvider } from "../application/ports/e
 export const describeEmbeddingProviderContract = (
   name: string,
   create: () => EmbeddingProvider,
+  options: {
+    /**
+     * El proveedor entiende SIGNIFICADO, no solo vocabulario compartido.
+     *
+     * `false` para el simulador, y no es una excusa: es su limitación
+     * declarada. Hace un *hashing trick* sobre la bolsa de palabras, así que
+     * «mascotas» y «perro» le quedan tan lejos como «mascotas» e «impuestos».
+     * Esa parte la cubre el otro carril de la búsqueda híbrida —el full-text de
+     * Postgres— y, en producción, un proveedor de verdad.
+     *
+     * Se declara aquí en vez de rebajar la prueba para todos: así la suite
+     * sigue sirviendo para lo que se escribió, que es comprobar que un
+     * proveedor de pago hace aquello por lo que se le paga.
+     */
+    readonly semantic: boolean;
+  },
 ): void => {
   describe(`Contrato de EmbeddingProvider — ${name}`, () => {
     it("declara su modelo y su dimensión", () => {
@@ -97,6 +113,33 @@ export const describeEmbeddingProviderContract = (
       expect(cosineSimilarity(base ?? [], parecido ?? [])).toBeGreaterThan(
         cosineSimilarity(base ?? [], distinto ?? []),
       );
+    });
+
+    /*
+     * Lo que separa un embedding de verdad del truco del simulador: encontrar
+     * la respuesta cuando el cliente NO usa las palabras del documento. Nadie
+     * pregunta por WhatsApp «¿el reglamento contempla animales de compañía?»;
+     * pregunta «¿puedo llevar mi perro?». Sin esta propiedad, el carril
+     * vectorial no aporta nada sobre el full-text que ya existe.
+     */
+    const semanticTest = options.semantic ? it : it.skip;
+
+    semanticTest("entiende sinónimos: acerca textos que no comparten palabras", async () => {
+      const provider = create();
+
+      const documents = await provider.embedDocuments([
+        "Se permiten mascotas de hasta quince kilos en las unidades residenciales.",
+        "El impuesto predial se liquida cada año sobre el avalúo catastral.",
+      ]);
+      const query = await provider.embedQuery("¿puedo llevar mi perro al apartamento?");
+
+      if (!isOk(query) || !isOk(documents)) throw new Error("debería vectorizar");
+
+      // "perro" no aparece en ningún documento: si acierta, es por significado.
+      const relevante = cosineSimilarity(query.value, documents.value[0] ?? []);
+      const ajeno = cosineSimilarity(query.value, documents.value[1] ?? []);
+
+      expect(relevante).toBeGreaterThan(ajeno);
     });
   });
 };

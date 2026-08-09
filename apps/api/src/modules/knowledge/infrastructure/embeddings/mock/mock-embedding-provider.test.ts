@@ -6,8 +6,13 @@ import { MockEmbeddingProvider } from "./mock-embedding-provider";
 
 const create = (): MockEmbeddingProvider => new MockEmbeddingProvider();
 
-// El simulador cumple el mismo contrato que cumplirá OpenAI en F8.
-describeEmbeddingProviderContract("MockEmbeddingProvider", create);
+/*
+ * El simulador cumple el mismo contrato que OpenAI, MENOS la parte semántica:
+ * es una bolsa de palabras y no conoce sinónimos. Declararlo aquí deja su
+ * limitación por escrito y, además, ejecutable — en vez de en un comentario
+ * que nadie relee.
+ */
+describeEmbeddingProviderContract("MockEmbeddingProvider", create, { semantic: false });
 
 const embed = async (text: string): Promise<readonly number[]> => {
   const result = await create().embedQuery(text);

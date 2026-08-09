@@ -58,6 +58,17 @@ const envSchema = z
     OPENAI_MODEL: z.string().optional(),
     OLLAMA_MODEL: z.string().default("llama3.1"),
 
+    /* Modelo de embeddings, que NO es el de chat: son dos catálogos distintos y
+       compartir la variable haría que cambiar de conversacional invalidara todo
+       lo indexado. El de OpenAI por defecto produce 1536 dimensiones, que es
+       justo lo que mide la columna. */
+    OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+    OLLAMA_EMBEDDING_MODEL: z.string().default("nomic-embed-text"),
+    /* Fragmentos por petición al vectorizar. Los proveedores acotan el lote y
+       el total de tokens; con documentos largos, bajarlo evita rechazos. */
+    EMBEDDING_BATCH_SIZE: z.coerce.number().int().min(1).max(512).default(96),
+    EMBEDDING_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
+
     /* Profundidad de razonamiento. `low` por defecto porque este agente
        responde por WhatsApp —donde la latencia se nota— y las decisiones que
        de verdad importan (intención, escalamiento, fechas, precios) las toman
@@ -145,19 +156,29 @@ const envSchema = z
   /* Coherencia entre proveedores y credenciales: si eliges un proveedor real,
      su clave deja de ser opcional. El modo demo nunca exige nada. */
   .superRefine((env, ctx) => {
-    const requireKey = (key: keyof typeof env, provider: string) => {
+    /*
+     * El mensaje nombra la variable que hay que tocar, no siempre la misma.
+     * Antes decía «usa LLM_PROVIDER=mock» también cuando quien exigía la clave
+     * era EMBEDDING_PROVIDER: mandaba a cambiar la variable equivocada, y con
+     * el agente ya en `mock` el arranque seguía fallando sin explicar por qué.
+     */
+    const requireKey = (key: keyof typeof env, setting: string, provider: string) => {
       if (!env[key]) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [key],
-          message: `Requerido cuando el proveedor es "${provider}". Usa LLM_PROVIDER=mock para el modo demo.`,
+          message:
+            `Requerido cuando ${setting} es "${provider}". ` +
+            `Usa ${setting}=mock para el modo demo.`,
         });
       }
     };
-    if (env.LLM_PROVIDER === "openai") requireKey("OPENAI_API_KEY", "openai");
-    if (env.LLM_PROVIDER === "anthropic") requireKey("ANTHROPIC_API_KEY", "anthropic");
-    if (env.LLM_PROVIDER === "gemini") requireKey("GEMINI_API_KEY", "gemini");
-    if (env.EMBEDDING_PROVIDER === "openai") requireKey("OPENAI_API_KEY", "openai");
+    if (env.LLM_PROVIDER === "openai") requireKey("OPENAI_API_KEY", "LLM_PROVIDER", "openai");
+    if (env.LLM_PROVIDER === "anthropic")
+      requireKey("ANTHROPIC_API_KEY", "LLM_PROVIDER", "anthropic");
+    if (env.LLM_PROVIDER === "gemini") requireKey("GEMINI_API_KEY", "LLM_PROVIDER", "gemini");
+    if (env.EMBEDDING_PROVIDER === "openai")
+      requireKey("OPENAI_API_KEY", "EMBEDDING_PROVIDER", "openai");
 
     if (env.AGENT_TURN_DEBOUNCE_MAX_MS < env.AGENT_TURN_DEBOUNCE_MS) {
       ctx.addIssue({
@@ -203,6 +224,13 @@ export interface AppConfig {
       effort: "low" | "medium" | "high" | "xhigh" | "max";
       timeoutMs: number;
       maxRetries: number;
+    };
+    /** Vectorización. Catálogo de modelos aparte del conversacional. */
+    embeddings: {
+      openaiModel: string;
+      ollamaModel: string;
+      batchSize: number;
+      timeoutMs: number;
     };
   };
   readonly whatsapp: {
@@ -283,6 +311,12 @@ const toAppConfig = (env: Env): AppConfig => ({
       effort: env.LLM_EFFORT,
       timeoutMs: env.LLM_TIMEOUT_MS,
       maxRetries: env.LLM_MAX_RETRIES,
+    },
+    embeddings: {
+      openaiModel: env.OPENAI_EMBEDDING_MODEL,
+      ollamaModel: env.OLLAMA_EMBEDDING_MODEL,
+      batchSize: env.EMBEDDING_BATCH_SIZE,
+      timeoutMs: env.EMBEDDING_TIMEOUT_MS,
     },
   },
   agent: {
