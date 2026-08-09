@@ -164,15 +164,22 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-504 tests unitarios con dobles en memoria, y 63 de integración contra Postgres
-de verdad y la aplicación entera montada. La separación importa: `pnpm test`
-funciona en un clon recién hecho, `pnpm test:integration` exige la base
-levantada.
+504 tests unitarios de la API, 52 del back-office con jsdom, y 63 de integración
+contra Postgres de verdad y la aplicación entera montada. La separación importa:
+`pnpm test` funciona en un clon recién hecho, `pnpm test:integration` exige la
+base levantada.
 
 Los de integración cubren lo que ningún doble puede imitar honestamente: que el
 filtro por inmobiliaria esté de verdad en el SQL, el `unaccent` y el lematizador
 español de Postgres, el `SKIP LOCKED` del outbox, y el HTTP real con su guardia
 de sesión y su manejador de errores.
+
+Los del panel se centran en lo que se rompe callado: que la respuesta de la API
+se valide contra el contrato compartido —y que el fallo salga ahí, con ruta y
+campo, y no tres componentes más abajo—, que el asesor vea los precios
+**exactamente** como los mandó el backend, que la sesión no se quede a medias
+tras un acceso fallido, y que un evento SSE ilegible no tumbe la pantalla donde
+se está atendiendo a un cliente.
 
 Y una tercera suite que mide otra cosa: **si el agente responde bien**. 24
 conversaciones con lo que debería y no debería pasar en cada turno, juzgadas por
