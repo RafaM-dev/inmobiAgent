@@ -12,6 +12,9 @@ import { OutboxEventPublisher } from "../platform/events/event-publisher";
 import { OutboxRelay } from "../platform/events/outbox";
 import { UuidV7Generator } from "../platform/ids/id-generator";
 import { createPinoRoot, PinoLogger } from "../platform/logging/pino-logger";
+import { LogNotifier } from "../platform/notifications/log-notifier";
+import type { Notifier } from "../platform/notifications/notifier";
+import { SmtpNotifier } from "../platform/notifications/smtp-notifier";
 import { InMemoryRateLimiter } from "../platform/rate-limit/in-memory-rate-limiter";
 import type { RateLimiter } from "../platform/rate-limit/rate-limiter";
 import type { FileStorage } from "../platform/storage/file-storage";
@@ -102,6 +105,34 @@ export const buildContainer = (config: AppConfig): AwilixContainer<AppCradle> =>
     fileStorage: asFunction(
       (c: AppCradle): FileStorage => new LocalFileStorage(c.config.storage.dir),
     ).singleton(),
+
+    /**
+     * ÚNICO punto donde se elige por dónde salen los avisos al equipo.
+     *
+     * `SMTP_HOST` es el interruptor, y no una variable propia de «modo demo»:
+     * un interruptor aparte podría quedarse en `false` con SMTP perfectamente
+     * configurado y nadie lo notaría hasta echar de menos un correo. Sin host
+     * no hay a dónde enviar, y eso no se puede contradecir.
+     */
+    notifier: asFunction((c: AppCradle): Notifier => {
+      if (!c.config.notifications.smtpEnabled) {
+        return new LogNotifier({ logger: c.logger });
+      }
+
+      const { host, port, secure, user, password, from, timeoutMs } = c.config.notifications;
+      return new SmtpNotifier({
+        options: {
+          host,
+          port,
+          secure,
+          ...(user !== undefined ? { user } : {}),
+          ...(password !== undefined ? { password } : {}),
+          from,
+          timeoutMs,
+        },
+        logger: c.logger,
+      });
+    }).singleton(),
 
     /**
      * ÚNICO punto donde se elige dónde se cuentan los ritmos.

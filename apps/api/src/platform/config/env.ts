@@ -127,6 +127,20 @@ const envSchema = z
       .refine((v) => Buffer.from(v, "base64").length === 32, {
         message: "ENCRYPTION_KEY debe ser 32 bytes en base64 (AES-256-GCM)",
       }),
+
+    /* Avisos al equipo. `SMTP_HOST` es el interruptor: sin él se escriben en el
+       log y la aplicación arranca igual, como todo lo demás. */
+    SMTP_HOST: z.string().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().positive().max(65_535).default(1025),
+    SMTP_SECURE: booleanish.default(false),
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASSWORD: z.string().min(1).optional(),
+    SMTP_FROM: z.string().min(3).default("AgentInmobi <avisos@agentinmobi.local>"),
+    SMTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+    /* Base pública del back-office. Los avisos llevan un enlace al hilo, y sin
+       esto el enlace apuntaría a la máquina que envió el correo. */
+    BACKOFFICE_URL: z.string().url().default("http://localhost:5173"),
   })
   /* Coherencia entre proveedores y credenciales: si eliges un proveedor real,
      su clave deja de ser opcional. El modo demo nunca exige nada. */
@@ -227,6 +241,19 @@ export interface AppConfig {
   readonly storage: { driver: "local"; dir: string };
   readonly knowledge: { maxDocumentBytes: number };
   readonly security: { encryptionKey: Buffer };
+  readonly notifications: {
+    /** `false` = los avisos se escriben en el log en vez de enviarse. */
+    smtpEnabled: boolean;
+    host: string;
+    port: number;
+    secure: boolean;
+    user?: string;
+    password?: string;
+    from: string;
+    timeoutMs: number;
+    /** Base del back-office para los enlaces del aviso, sin barra final. */
+    backofficeUrl: string;
+  };
 }
 
 const toAppConfig = (env: Env): AppConfig => ({
@@ -293,6 +320,17 @@ const toAppConfig = (env: Env): AppConfig => ({
   storage: { driver: env.STORAGE_DRIVER, dir: env.STORAGE_DIR },
   knowledge: { maxDocumentBytes: env.KNOWLEDGE_MAX_DOCUMENT_BYTES },
   security: { encryptionKey: Buffer.from(env.ENCRYPTION_KEY, "base64") },
+  notifications: {
+    smtpEnabled: env.SMTP_HOST !== undefined,
+    host: env.SMTP_HOST ?? "",
+    port: env.SMTP_PORT,
+    secure: env.SMTP_SECURE,
+    ...(env.SMTP_USER ? { user: env.SMTP_USER } : {}),
+    ...(env.SMTP_PASSWORD ? { password: env.SMTP_PASSWORD } : {}),
+    from: env.SMTP_FROM,
+    timeoutMs: env.SMTP_TIMEOUT_MS,
+    backofficeUrl: env.BACKOFFICE_URL.replace(/\/+$/, ""),
+  },
 });
 
 export class ConfigurationError extends Error {

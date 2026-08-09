@@ -11,6 +11,7 @@ import type { ConversationCradle } from "../conversation";
 import { requireSession, type IdentityCradle } from "../identity";
 import type { KnowledgeCradle } from "../knowledge";
 import type { LeadsCradle } from "../leads";
+import { onHandoffRequested } from "./application/event-handlers/on-handoff-requested";
 import { onTurnReady } from "./application/event-handlers/on-turn-ready";
 import { CitationGuardrail } from "./application/guardrails/citation.guardrail";
 import {
@@ -339,6 +340,19 @@ export const agentModule: ModuleRegistration<Cradle, FastifyInstance> = {
     return [
       onTurnReady({
         runTurn: cradle.runAgentTurn,
+        logger: cradle.logger.child({ module: "agent" }),
+      }),
+      /*
+       * El agente se suscribe a un evento que publica él mismo, y es
+       * deliberado: saca el aviso del turno. El cliente recibe «te paso con un
+       * asesor» al instante; el correo sale después, por el outbox, y si el
+       * servidor de correo está caído se reintenta sin que nadie lo note.
+       */
+      onHandoffRequested({
+        tenants: cradle.tenantDirectory,
+        conversations: cradle.conversationService,
+        notifier: cradle.notifier,
+        backofficeUrl: cradle.config.notifications.backofficeUrl,
         logger: cradle.logger.child({ module: "agent" }),
       }),
     ];

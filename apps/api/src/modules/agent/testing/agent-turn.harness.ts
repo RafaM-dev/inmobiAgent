@@ -3,6 +3,7 @@ import type { AppError } from "../../../platform/errors/app-error";
 import { DispatchingEventPublisher } from "../../../platform/events/event-publisher";
 import { SequentialIdGenerator } from "../../../platform/ids/id-generator";
 import { NoopLogger } from "../../../platform/logging/logger";
+import { InMemoryNotifier } from "../../../platform/notifications/in-memory-notifier";
 import { InMemoryRateLimiter } from "../../../platform/rate-limit/in-memory-rate-limiter";
 import type { RateLimiter } from "../../../platform/rate-limit/rate-limiter";
 import type { Quota, RateLimitDecision } from "../../../platform/rate-limit/token-bucket";
@@ -31,6 +32,7 @@ import {
 } from "../../knowledge/testing/in-memory-knowledge";
 import { ContextBuilder } from "../application/runtime/context-builder";
 import { ToolRegistry } from "../application/runtime/tool-registry";
+import { onHandoffRequested } from "../application/event-handlers/on-handoff-requested";
 import { HandoffCoordinator } from "../application/services/handoff-coordinator";
 import { PromptRegistry } from "../application/prompts/prompt-registry";
 import { systemPromptV1 } from "../application/prompts/system-prompt.v1";
@@ -234,6 +236,8 @@ export interface Harness {
   /** Expuesto para poder mover el tiempo: los límites de ritmo se reponen. */
   readonly clock: FixedClock;
   readonly rateLimiter: ControllableRateLimiter;
+  /** Avisos al equipo. Permite comprobar que un escalado no se queda mudo. */
+  readonly notifier: InMemoryNotifier;
   /**
    * Registro de métricas REAL, no un doble.
    *
@@ -272,6 +276,7 @@ export const createHarness = (options: {
   prompts.register(systemPromptV1);
 
   const handoff = new HandoffCoordinator({ conversations, events, logger });
+  const notifier = new InMemoryNotifier();
 
   const catalog = createInMemoryCatalog({ events, clock, logger });
 
@@ -289,6 +294,15 @@ export const createHarness = (options: {
 
   // Las mismas suscripciones que registra el módulo al arrancar.
   events.subscribe(...leads.subscriptions);
+  events.subscribe(
+    onHandoffRequested({
+      tenants,
+      conversations,
+      notifier,
+      backofficeUrl: "https://panel.pruebas",
+      logger,
+    }),
+  );
 
   const registry = new PrometheusMetrics({ logger });
   const metrics = createAppMetrics(registry);
@@ -362,6 +376,7 @@ export const createHarness = (options: {
     usage,
     clock,
     rateLimiter,
+    notifier,
     metrics: registry,
   };
 };

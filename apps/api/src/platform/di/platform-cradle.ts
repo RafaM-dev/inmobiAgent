@@ -8,6 +8,7 @@ import type { EventPublisher } from "../events/event-publisher";
 import type { OutboxRelay, OutboxStore } from "../events/outbox";
 import type { IdGenerator } from "../ids/id-generator";
 import type { Logger } from "../logging/logger";
+import type { Notifier } from "../notifications/notifier";
 import type { RateLimiter } from "../rate-limit/rate-limiter";
 import type { FileStorage } from "../storage/file-storage";
 import type { AppMetrics } from "../telemetry/app-metrics";
@@ -33,6 +34,8 @@ export interface PlatformCradle {
   fileStorage: FileStorage;
   /** Ritmo tolerado por clave: hoy en memoria, mañana en Redis (D58). */
   rateLimiter: RateLimiter;
+  /** Avisos a personas del equipo: SMTP si está configurado, log si no. */
+  notifier: Notifier;
 
   /**
    * Registro de métricas. Solo el composition root y el endpoint lo tocan.
