@@ -72,8 +72,52 @@ export type ChannelAccountContract = z.infer<typeof channelAccountSchema>;
  */
 export const channelAccountListResponseSchema = z.object({
   items: z.array(channelAccountSchema),
+  /**
+   * Canales que ESTE despliegue sabe operar, estén o no dados de alta.
+   *
+   * Viaja con la lista porque es la única forma honesta de que la pantalla
+   * sepa si ofrecer «conectar WhatsApp». Deducirlo de si ya hay una cuenta
+   * daría exactamente el caso contrario al que importa: sin cuenta y sin app
+   * de Meta configurada, se pintaría un formulario que no puede funcionar.
+   */
+  available: z.array(channelAccountSchema.shape.channelType),
 });
 export type ChannelAccountListResponse = z.infer<typeof channelAccountListResponseSchema>;
+
+/**
+ * Alta de un número de WhatsApp.
+ *
+ * Solo dos datos, y ninguno es de la app de Meta: esa es de la plataforma y se
+ * configura al desplegar. Lo que aporta cada inmobiliaria es SU número —el
+ * `phone_number_id` que Meta le asigna— y el token con el que se envía en su
+ * nombre.
+ *
+ * `phoneNumberId` no lleva formato validado a propósito. Es un identificador
+ * opaco de un proveedor externo: exigirle que sean dígitos funcionaría hasta el
+ * día que Meta cambie de criterio, y entonces el producto rechazaría números
+ * perfectamente válidos por una suposición nuestra.
+ */
+export const connectWhatsAppRequestSchema = z.object({
+  phoneNumberId: z.string().trim().min(1).max(120),
+  /** Cómo se llama esta línea en el panel. Para humanos, no para Meta. */
+  displayName: z.string().trim().min(1).max(60),
+  accessToken: z.string().trim().min(1).max(2000),
+});
+export type ConnectWhatsAppRequest = z.infer<typeof connectWhatsAppRequestSchema>;
+
+export const connectChannelResponseSchema = z.object({
+  account: channelAccountSchema,
+  /**
+   * Si se pudo confirmar contra el proveedor que las credenciales sirven.
+   *
+   * `false` NO significa que estén mal: significa que no se pudo comprobar.
+   * La cuenta queda guardada igual —ver D80— y la pantalla lo advierte.
+   */
+  verified: z.boolean(),
+  /** Qué impidió confirmarlo. Ausente cuando `verified` es `true`. */
+  verificationMessage: z.string().optional(),
+});
+export type ConnectChannelResponse = z.infer<typeof connectChannelResponseSchema>;
 
 export const settingsResponseSchema = z.object({
   tenant: z.object({

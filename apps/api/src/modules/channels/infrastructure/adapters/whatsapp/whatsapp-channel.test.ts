@@ -7,7 +7,12 @@ import type { ChannelCredentials } from "../../../application/ports/channel-cred
 import type { ChannelAccountView } from "../../../application/ports/chat-channel";
 import { ChannelType } from "../../../domain/value-objects/channel-type";
 import { WhatsAppChannel } from "./whatsapp-channel";
-import type { SendMessageInput, SendMessageOutput, WhatsAppClient } from "./whatsapp.client";
+import type {
+  SendMessageInput,
+  SendMessageOutput,
+  VerifyAccountInput,
+  WhatsAppClient,
+} from "./whatsapp.client";
 
 const NOW = new Date("2026-08-06T15:00:00Z");
 
@@ -23,7 +28,9 @@ const ACCOUNT: ChannelAccountView = {
 /** Cliente que registra lo enviado y puede fallar cuando se le pida. */
 class RecordingClient implements WhatsAppClient {
   readonly sent: SendMessageInput[] = [];
+  readonly verified: VerifyAccountInput[] = [];
   failAt: number | undefined;
+  rejectVerification: AppError | undefined;
 
   send(input: SendMessageInput): Promise<Result<SendMessageOutput, AppError>> {
     this.sent.push(input);
@@ -32,6 +39,11 @@ class RecordingClient implements WhatsAppClient {
       return Promise.resolve(err(new NotFoundError("Proveedor caído")));
     }
     return Promise.resolve(ok({ providerMessageId: `wamid.${String(this.sent.length)}` }));
+  }
+
+  verify(input: VerifyAccountInput): Promise<Result<void, AppError>> {
+    this.verified.push(input);
+    return Promise.resolve(this.rejectVerification ? err(this.rejectVerification) : okVoid());
   }
 }
 
@@ -198,5 +210,58 @@ describe("WhatsAppChannel — entrada", () => {
     expect(capabilities.supportsQuickReplies).toBe(true);
     expect(capabilities.supportsStreaming).toBe(false);
     expect(capabilities.maxTextLength).toBe(4096);
+  });
+});
+
+describe("WhatsAppChannel — comprobación de credenciales", () => {
+  it("pregunta al proveedor por el par (número, token) que le pasan", async () => {
+    const { channel, client } = build();
+
+    const result = await channel.verifyCredentials({
+      externalId: "1234567890",
+      credentials: { accessToken: "EAAG-nuevo" },
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(client.verified).toEqual([
+      { phoneNumberId: "1234567890", accessToken: "EAAG-nuevo" },
+    ]);
+  });
+
+  it("comprueba lo que le dan, NO lo que hay guardado", async () => {
+    // Es la razón de ser del método: se llama antes de guardar nada, para que
+    // un token equivocado se detecte mientras el asesor sigue en la pantalla.
+    const { channel, client } = build({ credentials: { accessToken: "EAAG-viejo" } });
+
+    await channel.verifyCredentials({
+      externalId: "1234567890",
+      credentials: { accessToken: "EAAG-nuevo" },
+    });
+
+    expect(client.verified[0]?.accessToken).toBe("EAAG-nuevo");
+  });
+
+  it("sin token no gasta un viaje a la red", async () => {
+    const { channel, client } = build();
+
+    const result = await channel.verifyCredentials({
+      externalId: "1234567890",
+      credentials: {},
+    });
+
+    expect(isErr(result)).toBe(true);
+    expect(client.verified).toHaveLength(0);
+  });
+
+  it("propaga el rechazo del proveedor tal cual, para poder mostrarlo", async () => {
+    const { channel, client } = build();
+    client.rejectVerification = new NotFoundError("Número", "1234567890");
+
+    const result = await channel.verifyCredentials({
+      externalId: "1234567890",
+      credentials: { accessToken: "EAAG-token" },
+    });
+
+    expect(isErr(result) && result.error.message).toContain("1234567890");
   });
 });

@@ -2,7 +2,10 @@ import type { Clock } from "../../../../../platform/clock/clock";
 import { ValidationError, type AppError } from "../../../../../platform/errors/app-error";
 import type { Logger } from "../../../../../platform/logging/logger";
 import { err, isErr, ok, type Result } from "../../../../../platform/result/result";
-import type { ChannelCredentials } from "../../../application/ports/channel-credentials";
+import {
+  WHATSAPP_CREDENTIAL_KEYS,
+  type ChannelCredentials,
+} from "../../../application/ports/channel-credentials";
 import type {
   ChannelAccountView,
   ChatChannel,
@@ -18,16 +21,6 @@ import { toWhatsAppMessages } from "./outbound.mapper";
 import { whatsAppCapabilities } from "./whatsapp-capabilities";
 import type { WhatsAppClient } from "./whatsapp.client";
 import type { WhatsAppWebhookPayload } from "./whatsapp.types";
-
-/** Claves que se esperan en las credenciales cifradas de la cuenta. */
-export const WHATSAPP_CREDENTIAL_KEYS = {
-  /** Token permanente de la app de Meta. */
-  accessToken: "accessToken",
-  /** Secreto de la app: con él se firma y se verifica el webhook. */
-  appSecret: "appSecret",
-  /** Token que elegimos nosotros para el alta del webhook. */
-  verifyToken: "verifyToken",
-} as const;
 
 /**
  * Canal de WhatsApp.
@@ -75,6 +68,25 @@ export class WhatsAppChannel implements ChatChannel {
   normalizeStatuses(raw: unknown, _account: ChannelAccountView): readonly DeliveryStatusUpdate[] {
     if (raw === null || typeof raw !== "object") return [];
     return toDeliveryStatuses(raw, this.deps.clock.now());
+  }
+
+  /**
+   * Comprueba el par (número, token) contra Meta al conectar la línea.
+   *
+   * Aquí sí se mira `accessToken` antes de llamar: un token vacío no merece un
+   * viaje a la red, y el mensaje "falta el token" es más útil que el 401 que
+   * devolvería Meta.
+   */
+  async verifyCredentials(input: {
+    externalId: string;
+    credentials: Readonly<Record<string, string>>;
+  }): Promise<Result<void, AppError>> {
+    const accessToken = input.credentials[WHATSAPP_CREDENTIAL_KEYS.accessToken];
+    if (!accessToken) {
+      return err(new ValidationError("Falta el token de acceso"));
+    }
+
+    return this.deps.client.verify({ phoneNumberId: input.externalId, accessToken });
   }
 
   async send(command: OutboundCommand): Promise<Result<DeliveryReceipt, AppError>> {

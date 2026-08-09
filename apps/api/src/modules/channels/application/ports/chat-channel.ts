@@ -87,6 +87,23 @@ export interface ChatChannel {
   normalizeStatuses(raw: unknown, account: ChannelAccountView): readonly DeliveryStatusUpdate[];
 
   send(command: OutboundCommand): Promise<Result<DeliveryReceipt, AppError>>;
+
+  /**
+   * Comprueba contra el proveedor que unas credenciales sirven, ANTES de que
+   * las estrene un cliente real.
+   *
+   * OPCIONAL, y por eso lleva `?`: la consola no tiene credenciales que
+   * comprobar. Un canal que no lo implemente simplemente no se verifica; quien
+   * llama lo trata como "no se pudo confirmar", no como un fallo.
+   *
+   * Recibe las credenciales SUELTAS y no un id de cuenta a propósito: se llama
+   * antes de guardarlas, que es el único momento en que comprobarlas sirve de
+   * algo. Verificar lo ya guardado solo diría que guardamos bien.
+   */
+  verifyCredentials?(input: {
+    readonly externalId: string;
+    readonly credentials: Readonly<Record<string, string>>;
+  }): Promise<Result<void, AppError>>;
 }
 
 /** Catálogo de canales disponibles en esta instalación. */

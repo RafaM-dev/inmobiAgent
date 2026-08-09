@@ -8,11 +8,19 @@ import type {
 import { Info, Loader2 } from "lucide-react";
 import { useEffect, useState, type ReactNode, type SyntheticEvent } from "react";
 import { toast } from "sonner";
+import { ConnectWhatsApp } from "@/components/ConnectWhatsApp";
 import { EmptyState, ErrorNotice, Page, PageHeader } from "@/components/page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -71,10 +79,27 @@ const channelLabel = (channel: ChannelAccountContract): string =>
 export const SettingsPage = (): ReactNode => {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [channels, setChannels] = useState<ChannelAccountContract[]>([]);
+  const [availableChannels, setAvailableChannels] = useState<ChannelAccountContract["channelType"][]>(
+    [],
+  );
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [draft, setDraft] = useState<UpdateAgentSettingsRequest>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /** Extraído del efecto porque también se llama tras conectar un canal. */
+  const loadChannels = (): void => {
+    api
+      .channelAccounts()
+      .then((response) => {
+        setChannels(response.items);
+        setAvailableChannels(response.available);
+      })
+      .catch(() => {
+        // Los canales son informativos: si fallan, la configuración sigue
+        // siendo editable. No se convierte en un error de pantalla completa.
+      });
+  };
 
   useEffect(() => {
     api
@@ -84,15 +109,7 @@ export const SettingsPage = (): ReactNode => {
         setError(cause instanceof ApiError ? cause.message : "No se pudo cargar la configuración");
       });
 
-    api
-      .channelAccounts()
-      .then((response) => {
-        setChannels(response.items);
-      })
-      .catch(() => {
-        // Los canales son informativos: si fallan, la configuración sigue
-        // siendo editable. No se convierte en un error de pantalla completa.
-      });
+    loadChannels();
 
     api
       .usage()
@@ -123,6 +140,7 @@ export const SettingsPage = (): ReactNode => {
   const hours = value.businessHours ?? { days: [1, 2, 3, 4, 5], from: "09:00", to: "18:00" };
   const dirty = Object.keys(draft).length > 0;
   const disabled = !canEdit || busy;
+  const whatsappAvailable = availableChannels.includes("WHATSAPP");
 
   const patch = (changes: UpdateAgentSettingsRequest): void => {
     setDraft((current) => ({ ...current, ...changes }));
@@ -478,6 +496,17 @@ export const SettingsPage = (): ReactNode => {
       <Card className={cn(channels.length > 0 && "overflow-hidden pb-0")}>
         <CardHeader>
           <CardTitle className="text-base">Canales conectados</CardTitle>
+          {!whatsappAvailable && (
+            <CardDescription>
+              Este despliegue no tiene configurada la app de Meta, así que WhatsApp no se puede
+              conectar desde aquí. El producto funciona entero por el simulador mientras tanto.
+            </CardDescription>
+          )}
+          {whatsappAvailable && canEdit && (
+            <CardAction>
+              <ConnectWhatsApp onConnected={loadChannels} />
+            </CardAction>
+          )}
         </CardHeader>
         <CardContent className={cn(channels.length > 0 && "px-0")}>
           {channels.length === 0 ? (

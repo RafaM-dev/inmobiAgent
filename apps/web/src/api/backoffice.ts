@@ -1,6 +1,7 @@
 import {
   appointmentListResponseSchema,
   channelAccountListResponseSchema,
+  connectChannelResponseSchema,
   conversationDetailSchema,
   inboxListResponseSchema,
   ingestDocumentResponseSchema,
@@ -12,6 +13,8 @@ import {
   usageSummarySchema,
   type AppointmentListResponse,
   type ChannelAccountListResponse,
+  type ConnectChannelResponse,
+  type ConnectWhatsAppRequest,
   type ConversationDetail,
   type CreateCollectionRequest,
   type InboxListResponse,
@@ -108,6 +111,9 @@ export const api = {
 
   channelAccounts: (): Promise<ChannelAccountListResponse> =>
     request("/api/channels/accounts", channelAccountListResponseSchema),
+
+  connectWhatsApp: (body: ConnectWhatsAppRequest): Promise<ConnectChannelResponse> =>
+    request("/api/channels/whatsapp", connectChannelResponseSchema, { method: "POST", body }),
 
   usage: (): Promise<UsageSummary> => request("/api/usage", usageSummarySchema),
 };

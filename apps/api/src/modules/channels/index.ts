@@ -2,13 +2,14 @@ import { asFunction, type AwilixContainer } from "awilix";
 import type { FastifyInstance } from "fastify";
 import type { ModuleRegistration } from "../../platform/di/app-module";
 import type { PlatformCradle } from "../../platform/di/platform-cradle";
-import { requireSession, type IdentityCradle } from "../identity";
+import { requireRole, requireSession, UserRole, type IdentityCradle } from "../identity";
 import { SecretBox } from "../../platform/crypto/secret-box";
 import type { ChannelStreamHub } from "./application/ports/channel-stream";
 import type { ChannelCredentials } from "./application/ports/channel-credentials";
 import type { ChannelRegistry, ChatChannel } from "./application/ports/chat-channel";
 import type { ReplyDispatcher } from "./application/ports/reply-dispatcher";
 import { ApplyDeliveryStatusUseCase } from "./application/use-cases/apply-delivery-status.use-case";
+import { ConnectChannelAccountUseCase } from "./application/use-cases/connect-channel-account.use-case";
 import { DispatchReplyUseCase } from "./application/use-cases/dispatch-reply.use-case";
 import { GetChannelCapabilitiesUseCase } from "./application/use-cases/get-channel-capabilities.use-case";
 import { ReceiveInboundMessageUseCase } from "./application/use-cases/receive-inbound-message.use-case";
@@ -86,6 +87,7 @@ export interface ChannelsCradle {
   resolveChannelAccount: ResolveChannelAccountUseCase;
   listChannelAccounts: ListChannelAccountsUseCase;
   registerChannelAccount: RegisterChannelAccountUseCase;
+  connectChannelAccount: ConnectChannelAccountUseCase;
   getChannelCapabilities: GetChannelCapabilitiesUseCase;
   applyDeliveryStatus: ApplyDeliveryStatusUseCase;
 }
@@ -213,6 +215,17 @@ export const channelsModule: ModuleRegistration<Cradle, FastifyInstance> = {
             ids: c.ids,
           }),
       ).singleton(),
+
+      connectChannelAccount: asFunction(
+        (c: Cradle) =>
+          new ConnectChannelAccountUseCase({
+            register: c.registerChannelAccount,
+            accounts: c.channelAccountRepository,
+            channels: c.channelRegistry,
+            credentials: c.channelCredentials,
+            logger: c.logger.child({ module: "channels" }),
+          }),
+      ).singleton(),
     });
   },
 
@@ -226,10 +239,13 @@ export const channelsModule: ModuleRegistration<Cradle, FastifyInstance> = {
 
     registerChannelAccountsRoutes(app, {
       listAccounts: cradle.listChannelAccounts,
+      connectAccount: cradle.connectChannelAccount,
+      channels: cradle.channelRegistry,
       requireSession: requireSession({
         sessions: cradle.sessionService,
         isProduction: cradle.config.isProduction,
       }),
+      requireAdmin: requireRole(UserRole.OWNER, UserRole.ADMIN),
     });
 
     if (cradle.config.whatsapp.enabled) {
