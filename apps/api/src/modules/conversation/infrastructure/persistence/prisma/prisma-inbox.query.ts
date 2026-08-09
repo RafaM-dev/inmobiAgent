@@ -1,4 +1,4 @@
-import { Prisma } from "../../../../../generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Database } from "../../../../../platform/database/prisma";
 import { tenantScope } from "../../../../../platform/database/tenant-scope";
 import { blocksToText, type ChannelType } from "../../../../channels";

@@ -1,0 +1,131 @@
+name: CI
+
+# Todo lo que `pnpm verify:full` comprueba en local, pero sin depender de que
+# alguien se acuerde de ejecutarlo. Las reglas de arquitectura son el caso
+# claro: son las que impiden que WhatsApp se filtre en la lógica de negocio, y
+# una regla que solo se comprueba a mano es una regla que se rompe.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # Un empujón nuevo cancela la ejecución anterior de la misma rama: nadie
+  # necesita el resultado de un commit que ya ha sido reemplazado.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # pnpm aborta si tiene que vaciar `node_modules` sin consola interactiva.
+  CI: "true"
+
+jobs:
+  verify:
+    name: Tipos, lint, arquitectura y tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # pgvector, no `postgres` a secas: sin la extensión, las migraciones
+      # fallan al crear la columna de vectores.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agentinmobi
+          POSTGRES_PASSWORD: agentinmobi
+          POSTGRES_DB: agentinmobi
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U agentinmobi -d agentinmobi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # El cliente de Prisma no está en el repositorio: se genera del esquema.
+      # Sin esto, la comprobación de tipos falla con tipos que aún no existen.
+      - run: pnpm --filter @agentinmobi/api db:generate
+
+      # La suite unitaria incluye la evaluación de calidad del agente, que corre
+      # contra el simulador: sin claves, sin coste y determinista.
+      - run: pnpm verify
+
+      - name: Tests de integración (Postgres real)
+        run: pnpm test:integration
+        env:
+          # DOS roles distintos, igual que en local y en producción. Si la
+          # aplicación se conectara con el superusuario, Row Level Security no
+          # protegería nada —se salta todas las políticas— y los tests de
+          # aislamiento entre inmobiliarias pasarían sin comprobar nada.
+          DATABASE_URL: postgresql://agentinmobi_app:agentinmobi_app@localhost:5433/agentinmobi?schema=public
+          DATABASE_ADMIN_URL: postgresql://agentinmobi:agentinmobi@localhost:5433/agentinmobi?schema=public
+
+  image:
+    name: La imagen construye y arranca
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Construir no basta: una imagen puede construirse perfectamente y morir
+      # al arrancar. Ya pasó —el bundle importaba TypeScript en crudo y el
+      # `pnpm build` no se quejaba— y por eso este trabajo la ejecuta.
+      - name: Construir
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: agentinmobi:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Arrancar y comprobar que responde
+        run: |
+          docker network create ci-net
+          docker run -d --name db --network ci-net \
+            -e POSTGRES_USER=agentinmobi \
+            -e POSTGRES_PASSWORD=agentinmobi \
+            -e POSTGRES_DB=agentinmobi \
+            pgvector/pgvector:pg16
+          until docker exec db pg_isready -U agentinmobi -d agentinmobi; do sleep 1; done
+
+          env=(
+            -e "DATABASE_URL=postgresql://agentinmobi_app:app@db:5432/agentinmobi?schema=public"
+            -e "DATABASE_ADMIN_URL=postgresql://agentinmobi:agentinmobi@db:5432/agentinmobi?schema=public"
+            # 32 bytes en base64. De pruebas y evidente.
+            -e "ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          )
+
+          # El paso de release, igual que en un despliegue de verdad.
+          docker run --rm --network ci-net "${env[@]}" agentinmobi:ci node apps/api/dist/release.js
+
+          docker run -d --name app --network ci-net -p 3000:3000 "${env[@]}" agentinmobi:ci
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:3000/health/ready && break || sleep 2
+          done
+
+          echo "--- el panel se sirve desde el mismo proceso (D84) ---"
+          curl -fsS -H 'Accept: text/html' -o /dev/null -w 'status:%{http_code} type:%{content_type}\n' \
+            http://localhost:3000/leads
+          echo "--- una ruta de API inexistente sigue devolviendo JSON ---"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/no-existe)" = "404"
+
+      - name: Logs si algo ha fallado
+        if: failure()
+        run: docker logs app || true

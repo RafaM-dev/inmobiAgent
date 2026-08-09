@@ -1,0 +1,92 @@
+# Despliegue autoalojado: la aplicación y su base, nada más.
+#
+# Levanta lo mismo que una plataforma gestionada, pero en una máquina tuya.
+# Sirve además como documentación ejecutable de lo que el producto necesita
+# para correr: un Postgres con pgvector y un proceso con estas variables.
+#
+#   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm release
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+#
+# Las variables vienen de un `.env.production` que NO está en el repositorio.
+# Mínimo imprescindible: POSTGRES_PASSWORD, APP_DB_PASSWORD, ENCRYPTION_KEY.
+#
+# `--env-file` NO es opcional. Sin él, Compose carga el `.env` de la raíz —el de
+# desarrollo— y arrancarías producción con la clave de cifrado de ejemplo y los
+# secretos de prueba de WhatsApp, sin que nada avise.
+
+x-app: &app
+  image: agentinmobi:${APP_VERSION:-local}
+  build:
+    context: .
+  # OJO: las anclas de YAML no fusionan mapas, reemplazan claves enteras. Todo
+  # lo que necesite CUALQUIERA de los dos servicios va aquí; si `app` declarara
+  # su propio `environment`, este bloque desaparecería por completo y el proceso
+  # arrancaría sin base de datos ni clave de cifrado.
+  environment:
+    NODE_ENV: production
+    APP_VERSION: ${APP_VERSION:-local}
+    # `all` = API y trabajos de fondo en el mismo proceso. Con varias
+    # instancias se separa en `api` y `worker`, para que los trabajos
+    # programados no se ejecuten por duplicado.
+    APP_ROLE: all
+    HTTP_PORT: 3000
+    DATABASE_URL: postgresql://agentinmobi_app:${APP_DB_PASSWORD}@postgres:5432/agentinmobi?schema=public
+    # Solo lo usa el paso de release, para crear el rol de la aplicación. El
+    # proceso que atiende tráfico NUNCA se conecta como superusuario: si lo
+    # hiciera, Row Level Security dejaría de proteger nada.
+    DATABASE_ADMIN_URL: postgresql://agentinmobi:${POSTGRES_PASSWORD}@postgres:5432/agentinmobi?schema=public
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    BACKOFFICE_URL: ${BACKOFFICE_URL}
+    # Panel y API comparten origen (D84), así que CORS no interviene en
+    # producción. Se deja vacío en vez de con un valor de desarrollo olvidado.
+    CORS_ORIGINS: ""
+    METRICS_TOKEN: ${METRICS_TOKEN:-}
+    WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+    WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_FROM: ${SMTP_FROM:-}
+    LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+    EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: agentinmobi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: agentinmobi
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentinmobi -d agentinmobi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # Sin puertos publicados: la base solo la ve la aplicación. Exponerla a
+    # internet es la forma más rápida de perder los datos de tus clientes.
+
+  # Paso de despliegue. Se ejecuta a mano ANTES de levantar la aplicación y
+  # termina; no es un servicio. Provisiona el rol, migra y recrea los índices.
+  release:
+    <<: *app
+    command: ["node", "apps/api/dist/release.js"]
+    restart: "no"
+    profiles: ["tools"]
+
+  app:
+    <<: *app
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:

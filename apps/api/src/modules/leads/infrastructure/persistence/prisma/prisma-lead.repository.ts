@@ -1,7 +1,7 @@
 import type {
   Lead as PrismaLead,
   LeadPropertyInterest as PrismaInterest,
-} from "../../../../../generated/prisma/client";
+} from "@prisma/client";
 import { toJson } from "../../../../../platform/database/json";
 import type { Database } from "../../../../../platform/database/prisma";
 import { assertWritableTenant, tenantScope } from "../../../../../platform/database/tenant-scope";

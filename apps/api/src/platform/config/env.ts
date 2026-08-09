@@ -38,6 +38,12 @@ const envSchema = z
       .string()
       .default("http://localhost:5173")
       .transform((v) => v.split(",").map((o) => o.trim()).filter(Boolean)),
+    /*
+     * Carpeta del panel compilado. Vacía en desarrollo, donde lo sirve Vite en
+     * su propio puerto; en el contenedor apunta al bundle y este proceso lo
+     * sirve, de modo que panel y API comparten origen (D84).
+     */
+    WEB_ROOT: z.string().optional(),
 
     DATABASE_URL: z.string().url(),
 
@@ -200,7 +206,13 @@ export interface AppConfig {
   readonly isProduction: boolean;
   readonly app: { name: string; version: string };
   readonly logging: { level: Env["LOG_LEVEL"]; pretty: boolean };
-  readonly http: { host: string; port: number; corsOrigins: string[] };
+  readonly http: {
+    host: string;
+    port: number;
+    corsOrigins: string[];
+    /** Panel compilado servido por este proceso. Ausente en desarrollo. */
+    webRoot?: string;
+  };
   readonly database: { url: string };
   readonly providers: {
     llm: LlmProviderKind;
@@ -289,7 +301,12 @@ const toAppConfig = (env: Env): AppConfig => ({
   isProduction: env.NODE_ENV === "production",
   app: { name: env.APP_NAME, version: env.APP_VERSION },
   logging: { level: env.LOG_LEVEL, pretty: env.LOG_PRETTY },
-  http: { host: env.HTTP_HOST, port: env.HTTP_PORT, corsOrigins: env.CORS_ORIGINS },
+  http: {
+    host: env.HTTP_HOST,
+    port: env.HTTP_PORT,
+    corsOrigins: env.CORS_ORIGINS,
+    ...(env.WEB_ROOT !== undefined ? { webRoot: env.WEB_ROOT } : {}),
+  },
   database: { url: env.DATABASE_URL },
   providers: {
     llm: env.LLM_PROVIDER,

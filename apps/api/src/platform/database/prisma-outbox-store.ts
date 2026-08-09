@@ -1,4 +1,4 @@
-import type { Prisma } from "../../generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { EventEnvelope } from "../events/event";
 import type { OutboxRecord, OutboxStore } from "../events/outbox";
 import type { Database } from "./prisma";

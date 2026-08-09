@@ -67,13 +67,9 @@ export const registerErrorHandler = (app: FastifyInstance, logger: Logger): void
     });
   });
 
-  app.setNotFoundHandler((request: FastifyRequest, reply: FastifyReply) => {
-    void reply.status(404).send({
-      error: {
-        code: "NOT_FOUND",
-        message: `Ruta no encontrada: ${request.method} ${request.url}`,
-        correlationId: request.correlationId,
-      },
-    });
-  });
+  /*
+   * El 404 NO se registra aquí: vive en `not-found.ts`, porque en producción
+   * deja de ser siempre un error —una URL como `/leads` es una ruta del panel—
+   * y esa decisión depende de si este proceso sirve o no el navegador (D84).
+   */
 };

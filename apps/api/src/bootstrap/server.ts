@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppCradle, AppModule } from "./container";
 import { registerErrorHandler } from "./http/error-handler";
+import { registerNotFound } from "./http/not-found";
 import { registerMetrics } from "./http/metrics.plugin";
 import { registerRequestContext } from "./http/request-context.plugin";
 import { registerSessionSupport } from "./http/session.plugin";
@@ -67,6 +68,16 @@ export const createServer = async (
       logger.debug("Rutas del módulo registradas", { module: module.name });
     }
   }
+
+  /*
+   * Al final, y a propósito: el panel es la alternativa cuando NINGUNA ruta de
+   * negocio ha coincidido. Registrarlo antes lo pondría por delante de rutas
+   * que sí existen.
+   */
+  await registerNotFound(app, {
+    ...(config.http.webRoot !== undefined ? { webRoot: config.http.webRoot } : {}),
+    logger: logger.child({ component: "http" }),
+  });
 
   return app;
 };

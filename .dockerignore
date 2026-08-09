@@ -1,0 +1,30 @@
+# Lo que NO entra en el contexto de construcción.
+#
+# No es solo por velocidad: `node_modules` del host trae binarios compilados
+# para otra plataforma, y colarlos en la imagen produce fallos de Prisma que
+# parecen de configuración y no lo son.
+
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+
+.git
+.github
+.claude
+
+# Secretos. El `.env` local NUNCA viaja a una imagen: la configuración de
+# producción se inyecta al ejecutar, no se hornea.
+.env
+.env.*
+!.env.example
+
+.storage
+backups
+coverage
+**/*.log
+
+# Documentación y utilidades: no se ejecutan en el contenedor.
+docs
+ops
+README.md

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { Application } from "../../src/bootstrap/application";
-import { PrismaClient } from "../../src/generated/prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { loadConfig, type AppConfig } from "../../src/platform/config/env";
 import { Database, type PrismaTx } from "../../src/platform/database/prisma";
 import { NoopLogger } from "../../src/platform/logging/logger";

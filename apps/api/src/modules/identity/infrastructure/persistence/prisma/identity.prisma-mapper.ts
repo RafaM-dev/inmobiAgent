@@ -2,7 +2,7 @@ import type {
   Session as PrismaSession,
   Tenant as PrismaTenant,
   User as PrismaUser,
-} from "../../../../../generated/prisma/client";
+} from "@prisma/client";
 import { InvariantViolationError } from "../../../../../platform/errors/app-error";
 import { Session } from "../../../domain/entities/session";
 import { Tenant } from "../../../domain/entities/tenant";

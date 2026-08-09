@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { PrismaClient } from "../../generated/prisma/client";
+import { PrismaClient } from "@prisma/client";
 import type { AppConfig } from "../config/env";
 import type { Logger } from "../logging/logger";
 import { TenantContext } from "../tenancy/tenant-context";

@@ -23,7 +23,6 @@ Thumbs.db
 !.vscode/extensions.json
 
 # Artefactos generados por Prisma
-apps/api/src/generated/
 
 # Originales de los documentos subidos (FileStorage local, D27).
 # Son datos de la inmobiliaria, no del proyecto.

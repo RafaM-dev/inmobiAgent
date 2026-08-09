@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { PrismaClient } from "../src/generated/prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { RLS_PROTECTED_TABLES } from "../prisma/rls/tables";
 import { latestBackup } from "./backup";
 import { databaseNameOf, resolveRunner, withDatabase, type PgRunner } from "./pg-tools";

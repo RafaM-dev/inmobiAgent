@@ -1,8 +1,8 @@
-import { Prisma } from "../../../../../generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import type {
   Document as PrismaDocument,
   KnowledgeCollection as PrismaCollection,
-} from "../../../../../generated/prisma/client";
+} from "@prisma/client";
 import type { Database } from "../../../../../platform/database/prisma";
 import { assertWritableTenant, tenantScope } from "../../../../../platform/database/tenant-scope";
 import type { IdGenerator } from "../../../../../platform/ids/id-generator";

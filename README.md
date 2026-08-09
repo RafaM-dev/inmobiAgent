@@ -125,6 +125,7 @@ proveedor sea cambiar una variable y no reescribir el agente.
 | `pnpm test` | Tests unitarios. No necesita infraestructura |
 | `pnpm test:integration` | Postgres real: crea la base `…_test`, migra y ejecuta |
 | `pnpm infra:up` / `infra:down` | Postgres (pgvector) y Mailpit |
+| `docker build -t agentinmobi .` | Imagen de producción: API + panel en un proceso |
 | `pnpm db:provision` | Crea el rol sin superusuario de la aplicación y sus permisos |
 | `pnpm db:migrate` | Provisiona el rol y aplica las migraciones |
 | `pnpm db:seed` | Inmobiliaria de demostración, su canal y su documentación |
@@ -137,6 +138,44 @@ pnpm chat --account otra
 ```
 
 Puertos: API `3100`, Postgres `5433`, Mailpit UI `8025`.
+
+## Despliegue
+
+**Un solo contenedor.** La API sirve también el panel, así que ambos comparten
+origen. No es por comodidad: la cookie de sesión es `SameSite=Lax` —lo que la
+protege de CSRF— y separarlos en dos dominios obligaría a debilitarla (D84).
+
+```bash
+docker build -t agentinmobi:$(git rev-parse --short HEAD) .
+```
+
+Y en cada despliegue, **antes** de levantar instancias nuevas:
+
+```bash
+docker run --rm <mismos-env> agentinmobi:… node apps/api/dist/release.js
+```
+
+Ese paso provisiona el rol sin `BYPASSRLS`, aplica las migraciones y recrea los
+índices que Prisma no sabe expresar. Va aparte del arranque a propósito: si
+migrara cada proceso al iniciarse, dos instancias levantándose a la vez
+competirían por el mismo `ALTER TABLE` (D87).
+
+Para una máquina propia, `docker-compose.prod.yml` levanta la aplicación y su
+base. **`--env-file` no es opcional**: sin él Compose carga el `.env` de
+desarrollo y arrancarías producción con la clave de cifrado de ejemplo.
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm release
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+Variables mínimas: `DATABASE_URL`, `DATABASE_ADMIN_URL`, `ENCRYPTION_KEY`,
+`BACKOFFICE_URL`. Todo lo demás tiene un valor por defecto que funciona, y sin
+ninguna clave de API el producto arranca entero en modo demo.
+
+Con más de una instancia, sepáralas por `APP_ROLE`: `api` atiende tráfico y
+`worker` ejecuta los trabajos de fondo. Con `all` en varias instancias, los
+trabajos programados se ejecutarían por duplicado.
 
 ## Estructura
 
@@ -160,7 +199,11 @@ docs/           Arquitectura y decisiones
 - introduce una dependencia circular;
 - añade una tabla con `tenant_id` sin protegerla con RLS ni justificar la excepción.
 
-No son convenciones de equipo: son reglas ejecutables.
+No son convenciones de equipo: son reglas ejecutables. Y las ejecuta CI en cada
+`push` y cada pull request, junto con los tests de integración contra un
+Postgres real y un trabajo que **construye la imagen y la arranca**. Eso último
+no es ceremonia: el artefacto de producción estuvo roto sin que ningún `build`
+se quejara, porque nadie lo había ejecutado nunca (D86).
 
 ## Qué se prueba, y contra qué
 
@@ -222,7 +265,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador. Rediseñado sobre shadcn/ui, con tema claro/oscuro | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · copias programadas, paneles | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · imagen, paso de release y CI ✅ · copias programadas, paneles | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

@@ -1,4 +1,4 @@
-import type { Appointment as PrismaAppointment } from "../../../../../generated/prisma/client";
+import type { Appointment as PrismaAppointment } from "@prisma/client";
 import { toJson } from "../../../../../platform/database/json";
 import type { Database } from "../../../../../platform/database/prisma";
 import { assertWritableTenant, tenantScope } from "../../../../../platform/database/tenant-scope";

@@ -3,7 +3,7 @@ import type {
   ContactProfile as PrismaContactProfile,
   Conversation as PrismaConversation,
   Message as PrismaMessage,
-} from "../../../../../generated/prisma/client";
+} from "@prisma/client";
 import { Contact } from "../../../domain/entities/contact";
 import { ContactProfile, type ProfileSlots } from "../../../domain/entities/contact-profile";
 import { Conversation } from "../../../domain/entities/conversation";

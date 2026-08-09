@@ -1,4 +1,4 @@
-import { Prisma } from "../../generated/prisma/client";
+import { Prisma } from "@prisma/client";
 import type { IdempotencyStore } from "../events/event-bus";
 import { TenantContext } from "../tenancy/tenant-context";
 import type { Database } from "./prisma";

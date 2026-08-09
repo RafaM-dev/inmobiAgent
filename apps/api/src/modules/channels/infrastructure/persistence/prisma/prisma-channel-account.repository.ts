@@ -1,4 +1,4 @@
-import type { ChannelAccount as PrismaChannelAccount } from "../../../../../generated/prisma/client";
+import type { ChannelAccount as PrismaChannelAccount } from "@prisma/client";
 import type { Database } from "../../../../../platform/database/prisma";
 import { toJson } from "../../../../../platform/database/json";
 import { assertWritableTenant, tenantScope } from "../../../../../platform/database/tenant-scope";

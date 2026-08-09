@@ -1,4 +1,4 @@
-import type { PropertySnapshot as PrismaSnapshot } from "../../../../../generated/prisma/client";
+import type { PropertySnapshot as PrismaSnapshot } from "@prisma/client";
 import type { Database } from "../../../../../platform/database/prisma";
 import { tenantScope } from "../../../../../platform/database/tenant-scope";
 import type { IdGenerator } from "../../../../../platform/ids/id-generator";

@@ -1,4 +1,4 @@
-import type { PrismaClient } from "../../generated/prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type { Clock } from "../clock/clock";
 import type { AppConfig } from "../config/env";
 import type { Database } from "../database/prisma";
