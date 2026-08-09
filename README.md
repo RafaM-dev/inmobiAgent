@@ -129,6 +129,7 @@ proveedor sea cambiar una variable y no reescribir el agente.
 | `pnpm db:provision` | Crea el rol sin superusuario de la aplicación y sus permisos |
 | `pnpm db:migrate` | Provisiona el rol y aplica las migraciones |
 | `pnpm db:seed` | Inmobiliaria de demostración, su canal y su documentación |
+| `fly volumes create agentinmobi_data --size 3` | El disco de los documentos. **Antes del primer despliegue** |
 
 El seed acepta parámetros, útil para comprobar el aislamiento entre inmobiliarias:
 
@@ -167,6 +168,7 @@ En **Fly.io**, que es el destino preparado, `fly.toml` ya lo describe todo y
 fly launch --no-deploy --copy-config
 fly postgres create --name agentinmobi-db
 fly postgres attach agentinmobi-db
+fly volumes create agentinmobi_data --size 3 --region bog   # el disco de los documentos
 fly secrets set ENCRYPTION_KEY="$(openssl rand -base64 32)"
 fly deploy
 ```
@@ -276,7 +278,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador. Rediseñado sobre shadcn/ui, con tema claro/oscuro | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · imagen, paso de release y CI ✅ · ingesta de PDF y Word ✅ · copias programadas, paneles | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · imagen, paso de release y CI ✅ · ingesta de PDF y Word ✅ · alta de usuarios y recuperación de contraseña ✅ · copias programadas, paneles | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

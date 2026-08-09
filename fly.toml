@@ -24,6 +24,14 @@ primary_region = "bog"
   APP_ROLE = "all"
   HTTP_PORT = "3000"
   NODE_ENV = "production"
+  # En el volumen, NO en el disco de la máquina. El sistema de archivos de una
+  # máquina de Fly es efímero: se borra en cada despliegue. Ahí dentro vive el
+  # texto extraído de cada documento, que es lo que lee el reindexado — así que
+  # sin volumen, el primer despliegue posterior a subir un reglamento dejaría
+  # ese documento imposible de reindexar, y cualquiera subido y aún sin indexar
+  # se perdería sin más. Las búsquedas seguirían funcionando (los fragmentos y
+  # sus vectores están en Postgres), que es lo que haría el fallo difícil de ver.
+  STORAGE_DIR = "/data/storage"
   # Panel y API comparten origen, así que CORS no interviene. Vacío y no
   # olvidado: dejar aquí un localhost de desarrollo sería peor que no ponerlo.
   CORS_ORIGINS = ""
@@ -58,6 +66,17 @@ primary_region = "bog"
     interval = "15s"
     timeout = "3s"
     grace_period = "20s"
+
+[mounts]
+  # Créalo antes del primer despliegue, en la misma región:
+  #   fly volumes create agentinmobi_data --size 3 --region bog
+  #
+  # Un volumen ata la aplicación a UNA máquina, y está bien: escalar a varias
+  # exige antes resolver los trabajos programados duplicados y los límites de
+  # ritmo en memoria. Cuando llegue ese día, el sustituto es S3/R2 detrás del
+  # puerto `FileStorage`, no un volumen más grande.
+  source = "agentinmobi_data"
+  destination = "/data"
 
 [[vm]]
   # El proceso mantiene en memoria el cliente de Prisma y el bundle del panel;

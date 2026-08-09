@@ -12,7 +12,10 @@
 # `libc6-compat` lo necesitan los binarios de Prisma, que se compilan contra
 # glibc y no contra musl.
 FROM node:22-alpine AS base
-RUN apk add --no-cache libc6-compat
+# `su-exec` lo usa el entrypoint para bajar de privilegios tras preparar el
+# disco de datos; sin él habría que elegir entre correr como root o no poder
+# escribir en un volumen montado.
+RUN apk add --no-cache libc6-compat su-exec
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 # pnpm pide confirmación por consola antes de vaciar `node_modules`, y en una
@@ -86,9 +89,15 @@ COPY --from=build /repo/apps/web/dist ./web
 # equivocada. El cliente generado ya va dentro de `node_modules`.
 COPY --from=build /repo/apps/api/prisma ./apps/api/prisma
 
-# Usuario sin privilegios. La imagen de Node ya trae `node` (uid 1000).
-RUN mkdir -p /app/.storage && chown -R node:node /app
-USER node
+COPY --from=build /repo/ops/docker-entrypoint.sh /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
+
+# La imagen de Node ya trae el usuario `node` (uid 1000). NO se usa `USER node`
+# aquí: el entrypoint necesita un instante de root para dar permiso sobre el
+# volumen montado, y entrega el control a `node` acto seguido. La aplicación no
+# corre nunca con privilegios.
+RUN chown -R node:node /app
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
 
 EXPOSE 3000
 

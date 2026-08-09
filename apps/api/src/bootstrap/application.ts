@@ -2,6 +2,7 @@ import type { AwilixContainer } from "awilix";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../platform/config/env";
 import type { Logger } from "../platform/logging/logger";
+import { asValue } from "awilix";
 import { buildContainer, type AppCradle, type AppModule } from "./container";
 import { appModules } from "./modules.registry";
 import { createServer } from "./server";
@@ -23,6 +24,18 @@ export interface ApplicationOptions {
    * demostraría nada sobre el que arranca en producción.
    */
   listen?: boolean;
+
+  /**
+   * Sustituciones en el contenedor, aplicadas antes de registrar los módulos.
+   *
+   * Costura de pruebas, y la única: permite cambiar una pieza de infraestructura
+   * —el notificador, un reloj fijo— dejando en pie TODO lo demás. Sin ella,
+   * probar un flujo que manda un correo obligaría a montar un servidor SMTP en
+   * cada test o a no probarlo, y lo segundo es lo que suele pasar.
+   *
+   * No se usa en producción: `main.ts` no la pasa nunca.
+   */
+  overrides?: Partial<Record<keyof AppCradle, unknown>>;
 }
 
 /**
@@ -43,6 +56,11 @@ export class Application {
   constructor(private readonly options: ApplicationOptions) {
     this.role = options.role ?? "all";
     this.container = buildContainer(options.config);
+
+    for (const [name, value] of Object.entries(options.overrides ?? {})) {
+      this.container.register({ [name]: asValue(value) });
+    }
+
     this.modules = options.modules ?? appModules;
     this.logger = this.cradle.logger.child({ component: "application", role: this.role });
   }

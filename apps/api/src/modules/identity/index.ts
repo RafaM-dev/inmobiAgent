@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { ModuleRegistration } from "../../platform/di/app-module";
 import type { PlatformCradle } from "../../platform/di/platform-cradle";
 import { registerAuthRoutes } from "./interface/http/auth.routes";
+import { registerTeamRoutes } from "./interface/http/team.routes";
 import { registerSettingsRoutes } from "./interface/http/settings.routes";
 import { requireRole, requireSession } from "./interface/http/session.guard";
 import { UpdateTenantSettingsUseCase } from "./application/use-cases/update-tenant-settings.use-case";
@@ -15,6 +16,18 @@ import { AdvisorDirectoryService } from "./application/services/advisor-director
 import { SessionServiceImpl } from "./application/services/session.service";
 import { TenantDirectoryService } from "./application/services/tenant-directory.service";
 import { SetUserPasswordUseCase } from "./application/use-cases/set-user-password.use-case";
+import {
+  RedeemUserTokenUseCase,
+  RequestPasswordResetUseCase,
+} from "./application/use-cases/account-recovery.use-cases";
+import {
+  InviteUserUseCase,
+  ListTeamUseCase,
+  UpdateTeamMemberUseCase,
+} from "./application/use-cases/manage-users.use-cases";
+import { InvitationMailer } from "./application/services/invitation-mailer";
+import type { UserTokenRepository } from "./domain/repositories/user-token.repository";
+import { PrismaUserTokenRepository } from "./infrastructure/persistence/prisma/prisma-user-token.repository";
 import type { SessionRepository } from "./domain/repositories/session.repository";
 import { PrismaSessionRepository } from "./infrastructure/persistence/prisma/prisma-session.repository";
 import type { TenantRepository } from "./domain/repositories/tenant.repository";
@@ -60,6 +73,13 @@ export interface IdentityCradle {
   sessionRepository: SessionRepository;
   sessionService: SessionService;
   setUserPassword: SetUserPasswordUseCase;
+  userTokenRepository: UserTokenRepository;
+  invitationMailer: InvitationMailer;
+  listTeam: ListTeamUseCase;
+  inviteUser: InviteUserUseCase;
+  updateTeamMember: UpdateTeamMemberUseCase;
+  requestPasswordReset: RequestPasswordResetUseCase;
+  redeemUserToken: RedeemUserTokenUseCase;
   createTenant: CreateTenantUseCase;
   updateTenantSettings: UpdateTenantSettingsUseCase;
   /**
@@ -86,8 +106,20 @@ export const identityModule: ModuleRegistration<Cradle, FastifyInstance> = {
     registerAuthRoutes(app, {
       sessions: cradle.sessionService,
       tenants: cradle.tenantDirectory,
+      requestPasswordReset: cradle.requestPasswordReset,
+      redeemToken: cradle.redeemUserToken,
       isProduction: cradle.config.isProduction,
       requireSession: session,
+    });
+
+    registerTeamRoutes(app, {
+      listTeam: cradle.listTeam,
+      inviteUser: cradle.inviteUser,
+      updateMember: cradle.updateTeamMember,
+      requireSession: session,
+      // Ver quién está en el equipo lo puede todo el mundo con sesión: hace
+      // falta para saber a quién asignar un lead. Cambiarlo, no.
+      requireAdmin: requireRole(UserRole.OWNER, UserRole.ADMIN),
     });
 
     registerSettingsRoutes(app, {
@@ -145,6 +177,60 @@ export const identityModule: ModuleRegistration<Cradle, FastifyInstance> = {
             users: c.userRepository,
             sessions: c.sessionRepository,
             unitOfWork: c.unitOfWork,
+            clock: c.clock,
+          }),
+      ).singleton(),
+
+      userTokenRepository: asFunction(
+        (c: Cradle): UserTokenRepository => new PrismaUserTokenRepository(c.database),
+      ).singleton(),
+
+      invitationMailer: asFunction(
+        (c: Cradle) =>
+          new InvitationMailer({
+            tokens: c.userTokenRepository,
+            notifier: c.notifier,
+            backofficeUrl: c.config.notifications.backofficeUrl,
+            clock: c.clock,
+            ids: c.ids,
+            logger: c.logger.child({ module: "identity", component: "invitaciones" }),
+          }),
+      ).singleton(),
+
+      listTeam: asFunction((c: Cradle) => new ListTeamUseCase({ users: c.userRepository })).singleton(),
+
+      inviteUser: asFunction(
+        (c: Cradle) =>
+          new InviteUserUseCase({
+            users: c.userRepository,
+            tenants: c.tenantRepository,
+            mailer: c.invitationMailer,
+            clock: c.clock,
+            ids: c.ids,
+          }),
+      ).singleton(),
+
+      updateTeamMember: asFunction(
+        (c: Cradle) => new UpdateTeamMemberUseCase({ users: c.userRepository, clock: c.clock }),
+      ).singleton(),
+
+      requestPasswordReset: asFunction(
+        (c: Cradle) =>
+          new RequestPasswordResetUseCase({
+            users: c.userRepository,
+            tenants: c.tenantRepository,
+            mailer: c.invitationMailer,
+            logger: c.logger.child({ module: "identity", component: "recuperacion" }),
+          }),
+      ).singleton(),
+
+      redeemUserToken: asFunction(
+        (c: Cradle) =>
+          new RedeemUserTokenUseCase({
+            tokens: c.userTokenRepository,
+            users: c.userRepository,
+            tenants: c.tenantRepository,
+            setPassword: c.setUserPassword,
             clock: c.clock,
           }),
       ).singleton(),

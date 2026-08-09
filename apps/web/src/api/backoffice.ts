@@ -3,19 +3,30 @@ import {
   channelAccountListResponseSchema,
   connectChannelResponseSchema,
   conversationDetailSchema,
+  inviteUserResponseSchema,
   inboxListResponseSchema,
   ingestDocumentResponseSchema,
   knowledgeCollectionListResponseSchema,
   knowledgeDocumentListResponseSchema,
   leadListResponseSchema,
+  redeemTokenResponseSchema,
   sessionResponseSchema,
   settingsResponseSchema,
+  teamListResponseSchema,
+  teamMemberSchema,
   usageSummarySchema,
   type AppointmentListResponse,
   type ChannelAccountListResponse,
   type ConnectChannelResponse,
   type ConnectWhatsAppRequest,
   type ConversationDetail,
+  type InviteUserRequest,
+  type InviteUserResponse,
+  type RedeemTokenRequest,
+  type RedeemTokenResponse,
+  type TeamListResponse,
+  type TeamMember,
+  type UpdateTeamMemberRequest,
   type CreateCollectionRequest,
   type InboxListResponse,
   type IngestDocumentRequest,
@@ -116,4 +127,22 @@ export const api = {
     request("/api/channels/whatsapp", connectChannelResponseSchema, { method: "POST", body }),
 
   usage: (): Promise<UsageSummary> => request("/api/usage", usageSummarySchema),
+
+  /* --------------------------------------------------------------- equipo */
+
+  team: (): Promise<TeamListResponse> => request("/api/users", teamListResponseSchema),
+
+  inviteUser: (body: InviteUserRequest): Promise<InviteUserResponse> =>
+    request("/api/users", inviteUserResponseSchema, { method: "POST", body }),
+
+  updateTeamMember: (userId: string, body: UpdateTeamMemberRequest): Promise<TeamMember> =>
+    request(`/api/users/${userId}`, teamMemberSchema, { method: "PATCH", body }),
+
+  /* -------------------------------------------------- entrar sin poder entrar */
+
+  forgotPassword: (body: { tenantSlug: string; email: string }): Promise<void> =>
+    requestVoid("/api/auth/forgot-password", { method: "POST", body }),
+
+  redeemToken: (body: RedeemTokenRequest): Promise<RedeemTokenResponse> =>
+    request("/api/auth/redeem", redeemTokenResponseSchema, { method: "POST", body }),
 };

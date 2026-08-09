@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { ThemeToggle } from "@/components/theme";
+import { api } from "../api/backoffice";
 import { ApiError } from "../api/client";
 import { useSession } from "../auth/session-context";
 
@@ -27,6 +29,37 @@ export const LoginPage = (): ReactNode => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  /**
+   * Pide el enlace de recuperación.
+   *
+   * Confirma SIEMPRE, exista la cuenta o no. Decir «ese correo no está» aquí
+   * convertiría esta pantalla en un comprobador de quién trabaja en cada
+   * inmobiliaria; el servidor tampoco lo distingue.
+   */
+  const recover = (): void => {
+    if (email.trim() === "" || tenantSlug.trim() === "") {
+      setError("Escribe la inmobiliaria y tu correo para poder mandarte el enlace.");
+      return;
+    }
+
+    setError(null);
+    setBusy(true);
+
+    api
+      .forgotPassword({ tenantSlug, email })
+      .then(() => {
+        setSent(true);
+        toast.success("Si esa cuenta existe, recibirás un enlace en unos minutos.");
+      })
+      .catch(() => {
+        setError("No se pudo contactar con el servidor");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
 
   const submit = (event: SyntheticEvent): void => {
     event.preventDefault();
@@ -122,6 +155,23 @@ export const LoginPage = (): ReactNode => {
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy && <Loader2 className="size-4 animate-spin" />}
                 {busy ? "Entrando…" : "Entrar"}
+              </Button>
+
+              {/*
+               * Aquí y no en otra pantalla: la inmobiliaria y el correo ya están
+               * escritos, que es justo lo que hace falta para pedir el enlace.
+               * Mandar a otra página obligaría a teclearlos otra vez, y quien no
+               * puede entrar ya está teniendo un mal rato.
+               */}
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto w-full p-0 font-normal"
+                disabled={busy || sent}
+                onClick={recover}
+              >
+                {sent ? "Si esa cuenta existe, el correo va en camino" : "No recuerdo mi contraseña"}
               </Button>
             </form>
           </CardContent>

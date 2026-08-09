@@ -6,6 +6,7 @@ import {
   MessagesSquare,
   Settings,
   Sparkles,
+  UserCog,
   Users,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -30,6 +31,7 @@ const NAV: readonly NavItem[] = [
   { to: "/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/conocimiento", label: "Conocimiento", icon: BookOpen },
   { to: "/simulador", label: "Simulador", icon: Sparkles },
+  { to: "/equipo", label: "Equipo", icon: UserCog },
   { to: "/configuracion", label: "Configuración", icon: Settings },
 ];
 

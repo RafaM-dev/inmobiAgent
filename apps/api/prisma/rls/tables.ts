@@ -51,6 +51,8 @@ export const RLS_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "El acceso al back-office resuelve el usuario ANTES de saber el tenant: es lo que se está autenticando.",
   sessions:
     "Validar la cookie ocurre antes de que exista contexto — de hecho es lo que lo establece.",
+  user_tokens:
+    "Mismo caso que `sessions`: el enlace de invitación o de restablecimiento llega sin sesión, y es el propio token el que resuelve a qué inmobiliaria pertenece. Con RLS no habría por dónde empezar a validarlo.",
   channel_accounts:
     "Es la consulta que DESCUBRE el tenant a partir de la cuenta por la que entró un mensaje (docs §7.1). Con RLS no habría por dónde empezar.",
   outbox_events:

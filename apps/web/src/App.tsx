@@ -10,7 +10,9 @@ import { KnowledgePage } from "./pages/KnowledgePage";
 import { LeadsPage } from "./pages/LeadsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PlaygroundPage } from "./pages/PlaygroundPage";
+import { RedeemPage } from "./pages/RedeemPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TeamPage } from "./pages/TeamPage";
 
 /**
  * Esqueleto de arranque.
@@ -48,7 +50,21 @@ export const App = (): ReactNode => {
   return (
     <>
       {state.status === "loading" && <BootSkeleton />}
-      {state.status === "anonymous" && <LoginPage />}
+
+      {/*
+       * Sin sesión también hay rutas, no solo el acceso: quien abre el enlace de
+       * una invitación o de un restablecimiento viene por definición sin sesión.
+       * Antes, cualquier ruta caía en la pantalla de acceso y esos enlaces no
+       * llevaban a ninguna parte.
+       */}
+      {state.status === "anonymous" && (
+        <Routes>
+          <Route path="/aceptar-invitacion" element={<RedeemPage mode="invitation" />} />
+          <Route path="/restablecer-contrasena" element={<RedeemPage mode="reset" />} />
+          <Route path="*" element={<LoginPage />} />
+        </Routes>
+      )}
+
       {state.status === "authenticated" && (
         <Routes>
           <Route element={<AppLayout />}>
@@ -58,6 +74,7 @@ export const App = (): ReactNode => {
             <Route path="/agenda" element={<AgendaPage />} />
             <Route path="/conocimiento" element={<KnowledgePage />} />
             <Route path="/simulador" element={<PlaygroundPage />} />
+            <Route path="/equipo" element={<TeamPage />} />
             <Route path="/configuracion" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/inbox" replace />} />
           </Route>

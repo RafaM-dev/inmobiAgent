@@ -1,4 +1,10 @@
-import { loginRequestSchema, type SessionResponse } from "@agentinmobi/contracts";
+import {
+  loginRequestSchema,
+  redeemTokenSchema,
+  requestPasswordResetSchema,
+  type RedeemTokenResponse,
+  type SessionResponse,
+} from "@agentinmobi/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ValidationError } from "../../../../platform/errors/app-error";
 import {
@@ -9,10 +15,16 @@ import { currentUser } from "./session.guard";
 import { isErr } from "../../../../platform/result/result";
 import type { TenantDirectory } from "../../application/ports/tenant-directory";
 import type { SessionService } from "../../application/ports/session-service";
+import type {
+  RedeemUserTokenUseCase,
+  RequestPasswordResetUseCase,
+} from "../../application/use-cases/account-recovery.use-cases";
 
 export interface AuthRoutesDeps {
   sessions: SessionService;
   tenants: TenantDirectory;
+  requestPasswordReset: RequestPasswordResetUseCase;
+  redeemToken: RedeemUserTokenUseCase;
   isProduction: boolean;
   requireSession: (
     request: FastifyRequest,
@@ -71,6 +83,54 @@ export const registerAuthRoutes = (app: FastifyInstance, deps: AuthRoutesDeps): 
     };
 
     return reply.status(200).send(body);
+  });
+
+  /**
+   * «He olvidado mi contraseña».
+   *
+   * Responde 202 SIEMPRE, exista la cuenta o no, y sin decir cuál es el caso.
+   * Contestar distinto convertiría este formulario en un comprobador de qué
+   * correos trabajan en qué inmobiliaria, probando uno a uno.
+   */
+  app.post("/api/auth/forgot-password", async (request, reply) => {
+    const parsed = requestPasswordResetSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ValidationError("Datos incompletos");
+    }
+
+    const result = await deps.requestPasswordReset.execute(parsed.data);
+    if (isErr(result)) throw result.error;
+
+    return reply.status(202).send();
+  });
+
+  /**
+   * Canje del enlace: vale igual para una invitación y para un
+   * restablecimiento. El token dice de quién es la cuenta; el cliente no.
+   */
+  app.post("/api/auth/redeem", async (request, reply) => {
+    const parsed = redeemTokenSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ValidationError(
+        "Datos inválidos",
+        parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      );
+    }
+
+    const result = await deps.redeemToken.execute(parsed.data);
+    if (isErr(result)) throw result.error;
+
+    /*
+     * NO se abre sesión automáticamente. Sería cómodo, pero significaría que
+     * quien tenga el enlace entra sin escribir nunca la contraseña — y ese
+     * enlace ha viajado por correo. Se devuelve con qué datos entrar y se
+     * exige el acceso normal.
+     */
+    const body: RedeemTokenResponse = result.value;
+    return reply.send(body);
   });
 
   app.post("/api/auth/logout", async (request, reply) => {

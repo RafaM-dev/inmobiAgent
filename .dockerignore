@@ -24,7 +24,9 @@ backups
 coverage
 **/*.log
 
-# Documentación y utilidades: no se ejecutan en el contenedor.
+# Documentación: no se ejecuta en el contenedor.
 docs
-ops
 README.md
+
+# `ops/` sí entra: dentro está el entrypoint que prepara el disco de datos.
+ops/prometheus

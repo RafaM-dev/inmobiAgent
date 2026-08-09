@@ -91,9 +91,12 @@ export interface ApplicationContext {
 
 export const withApplication = async (
   overrides: Partial<NodeJS.ProcessEnv> = {},
+  /** Piezas del contenedor sustituidas: el notificador, un reloj fijo… */
+  cradleOverrides: Partial<Record<string, unknown>> = {},
 ): Promise<ApplicationContext> => {
   const application = new Application({
     config: testConfig(overrides),
+    overrides: cradleOverrides,
     role: "api",
     // Sin socket: varios ficheros de test corren en paralelo y pelearían por
     // el puerto.
