@@ -3,7 +3,13 @@ import {
   type ChannelAccountContract,
   type ReplyBlockContract,
 } from "@agentinmobi/contracts";
+import { RotateCcw, Send, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
+import { ErrorNotice, PageHeader } from "@/components/page";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { api } from "../api/backoffice";
 import { ApiError } from "../api/client";
 import { MessageBlocks } from "../components/MessageBlocks";
@@ -16,8 +22,7 @@ interface Turn {
 }
 
 /** Identificador del cliente simulado. Uno nuevo = conversación nueva. */
-const newVisitorRef = (): string =>
-  `sim-${globalThis.crypto.randomUUID().slice(0, 8)}`;
+const newVisitorRef = (): string => `sim-${globalThis.crypto.randomUUID().slice(0, 8)}`;
 
 /**
  * Simulador: hablar con tu propio agente.
@@ -31,9 +36,9 @@ const newVisitorRef = (): string =>
  * Un simulador con su propio atajo interno probaría un camino que nadie usa, y
  * fallaría justo el día que hace falta.
  *
- * "Reiniciar" no borra nada: genera un remitente nuevo. Para el sistema es
- * otra persona, así que empieza una conversación limpia sin tocar el historial
- * de la anterior — que sigue ahí para revisarla.
+ * "Empezar de nuevo" no borra nada: genera un remitente nuevo. Para el sistema
+ * es otra persona, así que empieza una conversación limpia sin tocar el
+ * historial de la anterior — que sigue ahí para revisarla.
  */
 export const PlaygroundPage = (): ReactNode => {
   const [account, setAccount] = useState<ChannelAccountContract | null>(null);
@@ -151,43 +156,62 @@ export const PlaygroundPage = (): ReactNode => {
   };
 
   return (
-    <div className="page playground">
-      <div className="page__header">
-        <h1>Simulador</h1>
-        <div className="playground__meta">
-          <code>{visitorRef}</code>
-          <button type="button" className="button button--ghost" onClick={restart}>
-            Empezar de nuevo
-          </button>
-        </div>
+    <div className="mx-auto flex h-screen w-full max-w-3xl flex-col p-6">
+      <PageHeader
+        title="Simulador"
+        description="Hablas con tu agente por el mismo camino que un cliente real. Lo que ocurra aquí queda en el inbox y genera leads y citas de verdad."
+      >
+        <Badge variant="outline" className="font-mono text-[10px]">
+          {visitorRef}
+        </Badge>
+        <Button type="button" variant="outline" size="sm" onClick={restart}>
+          <RotateCcw className="size-4" />
+          Empezar de nuevo
+        </Button>
+      </PageHeader>
+
+      <div className="pt-4">
+        <ErrorNotice message={error} />
       </div>
 
-      <p className="hint">
-        Hablas con tu agente por el mismo camino que un cliente real. Lo que ocurra aquí queda en
-        el inbox y genera leads y citas de verdad.
-      </p>
-
-      {error !== null && <p className="error">{error}</p>}
-
-      <div className="playground__thread">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-4">
         {turns.length === 0 && (
-          <p className="empty">
-            Escribe como si fueras un cliente: «Busco apartamento de 2 habitaciones en Laureles».
-          </p>
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <Sparkles className="text-muted-foreground/60 size-7" />
+            <p className="text-muted-foreground max-w-sm text-sm">
+              Escribe como si fueras un cliente: «Busco apartamento de 2 habitaciones en
+              Laureles».
+            </p>
+          </div>
         )}
 
         {turns.map((turn) => (
-          <div key={turn.id} className={`bubble bubble--${turn.author}`}>
+          <div
+            key={turn.id}
+            className={cn(
+              "flex w-fit max-w-[85%] flex-col rounded-lg border px-3 py-2",
+              turn.author === "customer"
+                ? "bg-primary text-primary-foreground ml-auto border-transparent"
+                : "bg-card",
+            )}
+          >
             <MessageBlocks blocks={turn.blocks} />
           </div>
         ))}
 
-        {waiting && <div className="bubble bubble--agent bubble--waiting">Escribiendo…</div>}
+        {waiting && (
+          <div className="bg-card text-muted-foreground w-fit rounded-lg border px-3 py-2 text-sm">
+            <span className="inline-flex gap-1">
+              Escribiendo
+              <span className="animate-pulse">…</span>
+            </span>
+          </div>
+        )}
         <div ref={bottom} />
       </div>
 
-      <form className="playground__composer" onSubmit={send}>
-        <input
+      <form className="flex shrink-0 gap-2 border-t pt-3" onSubmit={send}>
+        <Input
           value={text}
           placeholder="Escribe como cliente…"
           disabled={account === null}
@@ -195,13 +219,10 @@ export const PlaygroundPage = (): ReactNode => {
             setText(event.target.value);
           }}
         />
-        <button
-          type="submit"
-          className="button button--primary"
-          disabled={account === null || text.trim().length === 0}
-        >
+        <Button type="submit" disabled={account === null || text.trim().length === 0}>
+          <Send className="size-4" />
           Enviar
-        </button>
+        </Button>
       </form>
     </div>
   );

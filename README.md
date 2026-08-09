@@ -142,7 +142,7 @@ Puertos: API `3100`, Postgres `5433`, Mailpit UI `8025`.
 
 ```
 apps/api        Backend (monolito modular, Clean Architecture)
-apps/web        Back-office React (Vite; hace de proxy de /api hacia la API)
+apps/web        Back-office React (Vite + Tailwind + shadcn/ui; proxy de /api)
 packages/contracts   Schemas Zod compartidos API ⇄ Web
 docs/           Arquitectura y decisiones
 ```
@@ -220,7 +220,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F4 | leads + appointments: captura, scoring, asignación, agenda de visitas y recordatorios | ✅ |
 | F5 | knowledge / RAG: ingesta, pgvector, búsqueda híbrida, respuestas con cita | ✅ |
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
-| F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
+| F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador. Rediseñado sobre shadcn/ui, con tema claro/oscuro | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
 | F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · copias programadas, paneles | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |

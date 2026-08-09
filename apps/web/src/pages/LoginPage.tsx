@@ -1,4 +1,10 @@
+import { AlertCircle, Loader2, MessagesSquare } from "lucide-react";
 import { useState, type ReactNode, type SyntheticEvent } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ApiError } from "../api/client";
 import { useSession } from "../auth/session-context";
 
@@ -10,7 +16,8 @@ import { useSession } from "../auth/session-context";
  * adivinar en autenticación siempre acaba mal.
  *
  * El mensaje de error es el que devuelve la API, que es deliberadamente el
- * mismo para "no existe" y "contraseña incorrecta".
+ * mismo para "no existe" y "contraseña incorrecta": distinguirlos permitiría
+ * averiguar qué correos están dados de alta.
  */
 export const LoginPage = (): ReactNode => {
   const { login } = useSession();
@@ -37,55 +44,79 @@ export const LoginPage = (): ReactNode => {
   };
 
   return (
-    <main className="login">
-      <form className="login__card" onSubmit={submit}>
-        <h1 className="login__brand">AgentInmobi</h1>
-        <p className="login__subtitle">Panel de la inmobiliaria</p>
+    <main className="bg-muted/40 grid min-h-screen place-items-center p-6">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className="bg-primary text-primary-foreground grid size-10 place-items-center rounded-lg">
+            <MessagesSquare className="size-5" />
+          </div>
+          <h1 className="font-heading text-lg font-semibold tracking-tight">AgentInmobi</h1>
+        </div>
 
-        <label className="field">
-          <span>Inmobiliaria</span>
-          <input
-            value={tenantSlug}
-            onChange={(event) => {
-              setTenantSlug(event.target.value);
-            }}
-            autoComplete="organization"
-            required
-          />
-        </label>
+        <Card>
+          <CardHeader>
+            <CardTitle>Panel de la inmobiliaria</CardTitle>
+            <CardDescription>Entra con la cuenta de tu inmobiliaria.</CardDescription>
+          </CardHeader>
 
-        <label className="field">
-          <span>Correo</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => {
-              setEmail(event.target.value);
-            }}
-            autoComplete="username"
-            required
-          />
-        </label>
+          <CardContent>
+            <form className="space-y-4" onSubmit={submit}>
+              <div className="space-y-2">
+                <Label htmlFor="tenantSlug">Inmobiliaria</Label>
+                <Input
+                  id="tenantSlug"
+                  value={tenantSlug}
+                  autoComplete="organization"
+                  required
+                  onChange={(event) => {
+                    setTenantSlug(event.target.value);
+                  }}
+                />
+              </div>
 
-        <label className="field">
-          <span>Contraseña</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
-            }}
-            autoComplete="current-password"
-            required
-          />
-        </label>
+              <div className="space-y-2">
+                <Label htmlFor="email">Correo</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  autoComplete="username"
+                  required
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                  }}
+                />
+              </div>
 
-        {error !== null && <p className="login__error">{error}</p>}
+              <div className="space-y-2">
+                <Label htmlFor="password">Contraseña</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  autoComplete="current-password"
+                  required
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                  }}
+                />
+              </div>
 
-        <button type="submit" className="button button--primary" disabled={busy}>
-          {busy ? "Entrando…" : "Entrar"}
-        </button>
-      </form>
+              {error !== null && (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy && <Loader2 className="size-4 animate-spin" />}
+                {busy ? "Entrando…" : "Entrar"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </main>
   );
 };

@@ -1,4 +1,6 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import path from "node:path";
 import { defineConfig } from "vite";
 
 /**
@@ -10,7 +12,11 @@ import { defineConfig } from "vite";
  * todo ocurre en el mismo origen — igual que ocurrirá en producción.
  */
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  // `@/…` es la convención que espera shadcn y la que evita los `../../../`.
+  resolve: {
+    alias: { "@": path.resolve(import.meta.dirname, "./src") },
+  },
   server: {
     // Explícito para que responda igual en `localhost` y en `127.0.0.1`: en
     // Windows, "localhost" resuelve a ::1 y deja fuera a cualquier herramienta

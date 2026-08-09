@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -15,6 +16,15 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   plugins: [react()],
+  /*
+   * El mismo alias que `vite.config.ts`. Duplicarlo es feo, pero vitest no lee
+   * la configuración de vite en este proyecto, y sin esto los componentes de
+   * shadcn —que se importan con `@/…`— no resuelven en las pruebas: el fallo es
+   * un módulo no encontrado, no un test en rojo, y despista el doble.
+   */
+  resolve: {
+    alias: { "@": path.resolve(import.meta.dirname, "./src") },
+  },
   test: {
     globals: false,
     environment: "jsdom",

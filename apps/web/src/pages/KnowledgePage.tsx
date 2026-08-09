@@ -2,7 +2,34 @@ import type {
   KnowledgeCollectionContract,
   KnowledgeDocumentContract,
 } from "@agentinmobi/contracts";
+import { BookOpen, FileUp, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode, type SyntheticEvent } from "react";
+import { toast } from "sonner";
+import { EmptyState, ErrorNotice, Page, PageHeader } from "@/components/page";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "../api/backoffice";
 import { ApiError } from "../api/client";
 
@@ -11,6 +38,16 @@ const STATUS_LABEL: Record<KnowledgeDocumentContract["status"], string> = {
   INDEXING: "Indexando",
   INDEXED: "Listo",
   FAILED: "Falló",
+};
+
+const STATUS_VARIANT: Record<
+  KnowledgeDocumentContract["status"],
+  "default" | "secondary" | "outline" | "destructive"
+> = {
+  PENDING: "outline",
+  INDEXING: "secondary",
+  INDEXED: "default",
+  FAILED: "destructive",
 };
 
 /** Tipos que el extractor de texto plano sabe leer. Nada más se ofrece. */
@@ -41,17 +78,16 @@ export const KnowledgePage = (): ReactNode => {
   const [selected, setSelected] = useState<string | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocumentContract[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   /**
-   * Borrar se confirma en dos pasos, en la propia fila. No se usa `confirm()`
-   * del navegador: bloquea el hilo y, en un panel que además recibe eventos en
-   * vivo, deja la pantalla congelada hasta que alguien la atienda.
+   * Borrar se confirma en un diálogo, no con el `confirm()` del navegador: ése
+   * bloquea el hilo y, en un panel que además recibe eventos en vivo, deja la
+   * pantalla congelada hasta que alguien la atienda.
    */
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<KnowledgeDocumentContract | null>(null);
 
   const fail = (cause: unknown, fallback: string): void => {
     setError(cause instanceof ApiError ? cause.message : fallback);
@@ -95,7 +131,6 @@ export const KnowledgePage = (): ReactNode => {
     if (selected === null) return;
     setBusy(true);
     setError(null);
-    setNotice(null);
 
     api
       .ingestDocument({
@@ -106,11 +141,13 @@ export const KnowledgePage = (): ReactNode => {
         content: input.content,
       })
       .then((response) => {
-        setNotice(
-          response.created
-            ? `«${response.title}» está en cola de indexado.`
-            : `«${response.title}» ya estaba en esta colección: mismo contenido, mismo documento.`,
-        );
+        if (response.created) {
+          toast.success(`«${response.title}» está en cola de indexado.`);
+        } else {
+          // La ingesta es idempotente por huella: subir dos veces el mismo
+          // reglamento no crea dos reglamentos, y conviene decirlo.
+          toast.info(`«${response.title}» ya estaba: mismo contenido, mismo documento.`);
+        }
         setTitle("");
         setText("");
         refresh();
@@ -151,7 +188,7 @@ export const KnowledgePage = (): ReactNode => {
     setError(null);
     action
       .then(() => {
-        setNotice(done);
+        toast.success(done);
         refresh();
       })
       .catch((cause: unknown) => {
@@ -165,179 +202,225 @@ export const KnowledgePage = (): ReactNode => {
   const collection = collections.find((item) => item.id === selected) ?? null;
 
   return (
-    <div className="page">
-      <div className="page__header">
-        <h1>Lo que sabe el agente</h1>
-        <button type="button" className="button button--ghost" onClick={refresh}>
+    <Page>
+      <PageHeader
+        title="Lo que sabe el agente"
+        description="Lo que entra aquí es lo único que el agente puede citar. Lo que no esté, dirá que no lo sabe — en vez de inventarlo."
+      >
+        <Button type="button" variant="outline" size="sm" onClick={refresh}>
+          <RefreshCw className="size-4" />
           Actualizar
-        </button>
-      </div>
+        </Button>
+      </PageHeader>
 
-      <div className="filters">
-        {collections.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`chip${selected === item.id ? " is-active" : ""}`}
-            onClick={() => {
-              setSelected(item.id);
-            }}
-          >
-            {item.name} ({item.documentCount})
-          </button>
-        ))}
-        {collections.length === 0 && (
-          <span className="empty">Todavía no hay ninguna colección.</span>
-        )}
-      </div>
+      {collections.length === 0 ? (
+        <EmptyState
+          icon={BookOpen}
+          title="Todavía no hay ninguna colección"
+          hint="Una colección agrupa documentos de un mismo tipo: políticas, requisitos, preguntas frecuentes."
+        />
+      ) : (
+        <Tabs
+          value={selected ?? ""}
+          onValueChange={(value) => {
+            setSelected(String(value));
+          }}
+        >
+          <TabsList>
+            {collections.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.name}
+                <Badge variant="secondary" className="ml-1.5 text-[10px]">
+                  {item.documentCount}
+                </Badge>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
 
-      {error !== null && <p className="error">{error}</p>}
-      {notice !== null && <p className="notice">{notice}</p>}
+      <ErrorNotice message={error} />
 
       {collection !== null && (
         <>
-          <div className="knowledge__upload">
-            <form onSubmit={submitText}>
-              <label className="field">
-                <span>Título</span>
-                <input
-                  value={title}
-                  onChange={(event) => {
-                    setTitle(event.target.value);
-                  }}
-                  placeholder="Requisitos para arrendar"
-                />
-              </label>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Añadir a «{collection.name}»</CardTitle>
+              <CardDescription>Solo texto: .txt, .md, .csv</CardDescription>
+            </CardHeader>
 
-              <label className="field">
-                <span>Texto</span>
-                <textarea
-                  rows={6}
-                  value={text}
-                  onChange={(event) => {
-                    setText(event.target.value);
-                  }}
-                  placeholder={"## Requisitos\nCédula, certificado laboral…"}
-                />
-              </label>
-
-              <div className="knowledge__actions">
-                <button
-                  type="submit"
-                  className="button button--primary"
-                  disabled={busy || text.trim().length === 0}
-                >
-                  Añadir texto
-                </button>
-
-                <label className="button button--ghost">
-                  Subir archivo
-                  <input
-                    type="file"
-                    accept={ACCEPTED}
-                    hidden
+            <CardContent>
+              <form className="space-y-4" onSubmit={submitText}>
+                <div className="space-y-2">
+                  <Label htmlFor="doc-title">Título</Label>
+                  <Input
+                    id="doc-title"
+                    value={title}
+                    placeholder="Requisitos para arrendar"
                     onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) submitFile(file);
-                      event.target.value = "";
+                      setTitle(event.target.value);
                     }}
                   />
-                </label>
+                </div>
 
-                <span className="hint">Solo texto: .txt, .md, .csv</span>
-              </div>
-            </form>
-          </div>
+                <div className="space-y-2">
+                  <Label htmlFor="doc-text">Texto</Label>
+                  <Textarea
+                    id="doc-text"
+                    rows={6}
+                    value={text}
+                    placeholder={"## Requisitos\nCédula, certificado laboral…"}
+                    className="font-mono text-xs"
+                    onChange={(event) => {
+                      setText(event.target.value);
+                    }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="submit" disabled={busy || text.trim().length === 0}>
+                    Añadir texto
+                  </Button>
+
+                  {/*
+                   * Un `<label>` con el input oculto: es la única forma de que
+                   * el selector de archivos se vea como el resto de botones sin
+                   * perder accesibilidad por teclado.
+                   */}
+                  <Button
+                    variant="outline"
+                    render={
+                      <label>
+                        <FileUp className="size-4" />
+                        Subir archivo
+                        <input
+                          type="file"
+                          accept={ACCEPTED}
+                          hidden
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) submitFile(file);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                    }
+                  />
+                </div>
+              </form>
+            </CardContent>
+          </Card>
 
           {documents.length === 0 ? (
-            <p className="empty">
-              Esta colección está vacía. Sin documentos, el agente dirá que no tiene esa
-              información — que es lo correcto, pero no ayuda a nadie.
-            </p>
+            <EmptyState
+              icon={BookOpen}
+              title="Esta colección está vacía"
+              hint="Sin documentos, el agente dirá que no tiene esa información — que es lo correcto, pero no ayuda a nadie."
+            />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Documento</th>
-                  <th>Estado</th>
-                  <th>Fragmentos</th>
-                  <th>Modelo</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((document) => (
-                  <tr key={document.id}>
-                    <td>
-                      {document.title}
-                      {document.failureReason !== undefined && (
-                        <div className="row__note">{document.failureReason}</div>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`badge badge--${document.status.toLowerCase()}`}>
-                        {STATUS_LABEL[document.status]}
-                      </span>
-                    </td>
-                    <td>{document.chunkCount}</td>
-                    <td className="cell--muted">{document.embeddingModel ?? "—"}</td>
-                    <td className="cell--actions">
-                      <button
-                        type="button"
-                        className="button button--ghost"
-                        disabled={busy}
-                        onClick={() => {
-                          act(api.reindexDocument(document.id), "Documento reencolado.");
-                        }}
-                      >
-                        Reindexar
-                      </button>
-                      {confirming === document.id ? (
-                        <>
-                          <button
+            <Card className="overflow-hidden py-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Documento</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="text-right">Fragmentos</TableHead>
+                    <TableHead>Modelo</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((document) => (
+                    <TableRow key={document.id}>
+                      <TableCell>
+                        <div className="font-medium">{document.title}</div>
+                        {document.failureReason !== undefined && (
+                          <div className="text-destructive mt-0.5 text-xs">
+                            {document.failureReason}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={STATUS_VARIANT[document.status]}>
+                          {STATUS_LABEL[document.status]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">{document.chunkCount}</TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-xs">
+                        {document.embeddingModel ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button
                             type="button"
-                            className="button button--danger"
+                            variant="ghost"
+                            size="sm"
                             disabled={busy}
                             onClick={() => {
-                              setConfirming(null);
-                              act(
-                                api.deleteDocument(document.id),
-                                "Documento borrado. El agente ya no puede citarlo.",
-                              );
+                              act(api.reindexDocument(document.id), "Documento reencolado.");
                             }}
                           >
-                            Confirmar
-                          </button>
-                          <button
+                            <RefreshCw className="size-4" />
+                            Reindexar
+                          </Button>
+                          <Button
                             type="button"
-                            className="button button--ghost"
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            disabled={busy}
                             onClick={() => {
-                              setConfirming(null);
+                              setConfirming(document);
                             }}
                           >
-                            Cancelar
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          className="button button--ghost"
-                          disabled={busy}
-                          onClick={() => {
-                            setConfirming(document.id);
-                          }}
-                        >
-                          Borrar
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                            <Trash2 className="size-4" />
+                            Borrar
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
           )}
         </>
       )}
-    </div>
+
+      <Dialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Borrar «{confirming?.title ?? ""}»?</DialogTitle>
+            <DialogDescription>
+              El agente dejará de poder citarlo de inmediato. Si alguien pregunta por lo que dice
+              este documento, responderá que no lo sabe. No se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline">Cancelar</Button>} />
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const target = confirming;
+                setConfirming(null);
+                if (target)
+                  act(
+                    api.deleteDocument(target.id),
+                    "Documento borrado. El agente ya no puede citarlo.",
+                  );
+              }}
+            >
+              Borrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Page>
   );
 };

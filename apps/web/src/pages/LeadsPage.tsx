@@ -1,6 +1,21 @@
 import type { LeadSummaryContract } from "@agentinmobi/contracts";
+import { ArrowRight, Users } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { EmptyState, ErrorNotice, Page, PageHeader } from "@/components/page";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { api } from "../api/backoffice";
 import { ApiError } from "../api/client";
 
@@ -14,6 +29,18 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const BAND_LABEL: Record<string, string> = { HOT: "Caliente", WARM: "Tibio", COLD: "Frío" };
+
+/**
+ * La temperatura se ve, no se lee.
+ *
+ * Son tokens del sistema (`--hot`, `--warm`, `--cold`), no colores sueltos: el
+ * mismo rojo significa lo mismo aquí, en el inbox y en cualquier panel futuro.
+ */
+const BAND_CLASS: Record<string, string> = {
+  HOT: "bg-hot text-hot-foreground border-transparent",
+  WARM: "bg-warm text-warm-foreground border-transparent",
+  COLD: "bg-cold text-cold-foreground border-transparent",
+};
 
 const FILTERS = [
   { key: "", label: "Todos" },
@@ -46,77 +73,92 @@ export const LeadsPage = (): ReactNode => {
   }, [band]);
 
   return (
-    <div className="page">
-      <div className="page__header">
-        <h1>Leads</h1>
-        <span className="page__count">{items.length}</span>
-      </div>
+    <Page>
+      <PageHeader
+        title="Leads"
+        description="Ordenados por puntuación: arriba está a quién llamar ahora."
+      >
+        <Badge variant="secondary">{items.length}</Badge>
+      </PageHeader>
 
-      <div className="filters">
-        {FILTERS.map((filter) => (
-          <button
-            key={filter.key}
-            type="button"
-            className={`chip${band === filter.key ? " is-active" : ""}`}
-            onClick={() => {
-              setBand(filter.key);
-            }}
-          >
-            {filter.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={band}
+        onValueChange={(value) => {
+          setBand(String(value));
+        }}
+      >
+        <TabsList>
+          {FILTERS.map((filter) => (
+            <TabsTrigger key={filter.key} value={filter.key}>
+              {filter.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {error !== null && <p className="error">{error}</p>}
-      {items.length === 0 && error === null && <p className="empty">Todavía no hay leads.</p>}
+      <ErrorNotice message={error} />
 
-      {items.length > 0 && (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Puntuación</th>
-              <th>Estado</th>
-              <th>Inmuebles vistos</th>
-              <th>Asignado</th>
-              <th>Última actividad</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((lead) => (
-              <tr key={lead.id}>
-                <td>
-                  <span className={`badge badge--${lead.band.toLowerCase()}`}>
-                    {lead.score} · {BAND_LABEL[lead.band] ?? lead.band}
-                  </span>
-                </td>
-                <td>{STATUS_LABEL[lead.status] ?? lead.status}</td>
-                <td>{lead.interestCount}</td>
-                <td>{lead.assignedUserId === undefined ? "Sin asignar" : "Asignado"}</td>
-                <td>
-                  {new Date(lead.lastActivityAt).toLocaleString("es-CO", {
-                    day: "2-digit",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={() => {
-                      void navigate(`/inbox/${lead.conversationId}`);
-                    }}
-                  >
-                    Ver conversación
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {items.length === 0 && error === null ? (
+        <EmptyState
+          icon={Users}
+          title="Todavía no hay leads"
+          hint="Se crean solos: en cuanto el agente le enseña un inmueble a alguien, aparece aquí sin que nadie lo registre."
+        />
+      ) : (
+        items.length > 0 && (
+          <Card className="overflow-hidden py-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Puntuación</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-right">Inmuebles vistos</TableHead>
+                  <TableHead>Asignado</TableHead>
+                  <TableHead>Última actividad</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((lead) => (
+                  <TableRow key={lead.id}>
+                    <TableCell>
+                      <Badge className={cn("tabular-nums", BAND_CLASS[lead.band])}>
+                        {lead.score} · {BAND_LABEL[lead.band] ?? lead.band}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{STATUS_LABEL[lead.status] ?? lead.status}</TableCell>
+                    <TableCell className="text-right">{lead.interestCount}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {lead.assignedUserId === undefined ? "Sin asignar" : "Asignado"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(lead.lastActivityAt).toLocaleString("es-CO", {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          void navigate(`/inbox/${lead.conversationId}`);
+                        }}
+                      >
+                        Ver conversación
+                        <ArrowRight className="size-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        )
       )}
-    </div>
+    </Page>
   );
 };
