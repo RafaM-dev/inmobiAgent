@@ -1,0 +1,66 @@
+# Despliegue en Fly.io.
+#
+# Un solo proceso sirve la API y el panel (D84). La base es un Postgres de Fly
+# con la extensión pgvector, que la primera migración crea sola.
+#
+# Puesta en marcha, una vez:
+#   fly launch --no-deploy --copy-config
+#   fly postgres create --name agentinmobi-db
+#   fly postgres attach agentinmobi-db          # define DATABASE_URL
+#   fly secrets set ENCRYPTION_KEY="$(openssl rand -base64 32)"
+#   fly secrets set BACKOFFICE_URL="https://agentinmobi.fly.dev"
+#   fly deploy
+#
+# `app` lo reescribe `fly launch` con el nombre que elijas: los nombres son
+# únicos en toda la plataforma.
+
+app = "agentinmobi"
+primary_region = "bog"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_ROLE = "all"
+  HTTP_PORT = "3000"
+  NODE_ENV = "production"
+  # Panel y API comparten origen, así que CORS no interviene. Vacío y no
+  # olvidado: dejar aquí un localhost de desarrollo sería peor que no ponerlo.
+  CORS_ORIGINS = ""
+
+[deploy]
+  # Provisiona el rol sin BYPASSRLS, migra y recrea los índices de búsqueda.
+  # Fly lo ejecuta en una máquina temporal ANTES de publicar la versión nueva:
+  # si falla, el despliegue se aborta y sigue corriendo la versión anterior.
+  # Es exactamente la separación que describe D87.
+  release_command = "node apps/api/dist/release.js"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  # NO se apaga sola. Es la decisión que más importa de este archivo: dentro
+  # del proceso corren el relay del outbox y los recordatorios de visita. Una
+  # máquina dormida no despierta porque toque mandar un recordatorio —solo
+  # despierta con una petición HTTP—, así que dormirla significa recordatorios
+  # que no salen y reintentos que no se ejecutan. Ahorrar unos céntimos a
+  # cambio de eso no es un ahorro.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    # `/health/live` y no `/health/ready`: esta sonda decide si REINICIAR la
+    # máquina. Con la de readiness, un Postgres caído provocaría un bucle de
+    # reinicios, que es justo lo que no arregla un Postgres caído.
+    path = "/health/live"
+    method = "GET"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "20s"
+
+[[vm]]
+  # El proceso mantiene en memoria el cliente de Prisma y el bundle del panel;
+  # 512 MB va justo. 1 GB deja sitio para indexar documentos sin rozar el techo.
+  size = "shared-cpu-1x"
+  memory = "1gb"

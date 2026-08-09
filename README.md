@@ -160,6 +160,17 @@ Ese paso provisiona el rol sin `BYPASSRLS`, aplica las migraciones y recrea los
 migrara cada proceso al iniciarse, dos instancias levantándose a la vez
 competirían por el mismo `ALTER TABLE` (D87).
 
+En **Fly.io**, que es el destino preparado, `fly.toml` ya lo describe todo y
+`.github/workflows/deploy.yml` despliega solo cuando CI pasa en `main`:
+
+```bash
+fly launch --no-deploy --copy-config
+fly postgres create --name agentinmobi-db
+fly postgres attach agentinmobi-db
+fly secrets set ENCRYPTION_KEY="$(openssl rand -base64 32)"
+fly deploy
+```
+
 Para una máquina propia, `docker-compose.prod.yml` levanta la aplicación y su
 base. **`--env-file` no es opcional**: sin él Compose carga el `.env` de
 desarrollo y arrancarías producción con la clave de cifrado de ejemplo.
@@ -265,7 +276,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador. Rediseñado sobre shadcn/ui, con tema claro/oscuro | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · imagen, paso de release y CI ✅ · copias programadas, paneles | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · imagen, paso de release y CI ✅ · ingesta de PDF y Word ✅ · copias programadas, paneles | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

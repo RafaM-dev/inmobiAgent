@@ -1,0 +1,60 @@
+name: Desplegar
+
+# Despliega a Fly.io cuando `main` pasa CI. No antes: subir a producción algo
+# que no ha pasado las reglas de arquitectura ni los tests es exactamente lo
+# que esas comprobaciones existen para evitar.
+#
+# Requiere un secreto `FLY_API_TOKEN` en el repositorio:
+#   fly tokens create deploy   →   Settings › Secrets › Actions
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  # Y a mano, para poder reintentar un despliegue sin tocar el código.
+  workflow_dispatch:
+
+concurrency:
+  # Nunca dos despliegues a la vez, y sin cancelar el que ya está en marcha:
+  # abortar a mitad puede dejar las migraciones aplicadas y el código sin
+  # publicar.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Fly.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # `workflow_dispatch` no trae conclusión; en ese caso se despliega igual.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # `--remote-only`: la imagen se construye en los constructores de Fly, no
+      # aquí. Evita subir varios cientos de megas por la red en cada despliegue.
+      #
+      # Las migraciones NO van en este paso: las lanza el `release_command` de
+      # fly.toml, en una máquina temporal y antes de publicar la versión nueva.
+      # Si fallan, el despliegue se aborta y sigue corriendo la versión anterior.
+      - name: Desplegar
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Comprobar que la versión nueva responde
+        run: |
+          url="https://$(flyctl config show --json | jq -r .app_name).fly.dev"
+          for _ in $(seq 1 20); do
+            curl -fsS "$url/health/ready" && exit 0
+            sleep 5
+          done
+          echo "La aplicación no respondió tras el despliegue."
+          flyctl logs --no-tail | tail -50
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

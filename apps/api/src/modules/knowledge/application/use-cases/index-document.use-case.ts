@@ -7,6 +7,7 @@ import { err, isErr, ok, type Result } from "../../../../platform/result/result"
 import type { FileStorage } from "../../../../platform/storage/file-storage";
 import type { TokenCounter } from "../../../../platform/text/token-counter";
 import type { Document } from "../../domain/entities/document";
+import { EXTRACTED_MIME } from "./ingest-document.use-case";
 import {
   chunkDocument,
   toEmbeddableText,
@@ -128,9 +129,17 @@ export class IndexDocumentUseCase {
     const original = await this.deps.storage.get(ref);
     if (isErr(original)) return original;
 
-    const extracted = this.deps.extractors.extract({
-      content: original.value.toString("utf8"),
-      mimeType: document.mimeType,
+    /*
+     * Se extrae como TEXTO, no con el tipo original del documento.
+     *
+     * Lo que hay guardado no es el PDF: es el texto que se sacó de él al
+     * ingerirlo (ver `EXTRACTED_MIME`). Pasarle aquí `application/pdf` mandaría
+     * ese texto al lector de PDF, que no sabría abrirlo — y el documento se
+     * quedaría en fallo cada vez que alguien lo reindexara.
+     */
+    const extracted = await this.deps.extractors.extract({
+      content: original.value,
+      mimeType: EXTRACTED_MIME,
     });
     if (isErr(extracted)) return extracted;
 

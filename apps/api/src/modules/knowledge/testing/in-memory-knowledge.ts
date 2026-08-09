@@ -115,7 +115,7 @@ export const createInMemoryKnowledge = (deps: {
         title: input.title,
         sourceType: DocumentSourceType.TEXT,
         mimeType: "text/markdown",
-        content: input.text,
+        content: Buffer.from(input.text, "utf8"),
       };
 
       const ingested = await ingest.execute(command);

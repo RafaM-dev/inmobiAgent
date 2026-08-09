@@ -45,7 +45,7 @@ describe("Búsqueda de conocimiento (Postgres real: pgvector + full-text españo
         title: titulo,
         sourceType: DocumentSourceType.TEXT,
         mimeType: "text/markdown",
-        content: contenido,
+        content: Buffer.from(contenido, "utf8"),
       });
       if (isErr(documento)) throw documento.error;
 

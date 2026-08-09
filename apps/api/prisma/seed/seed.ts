@@ -66,7 +66,7 @@ const seedKnowledge = async (cradle: AppCradle): Promise<void> => {
       title: document.title,
       sourceType: DocumentSourceType.TEXT,
       mimeType: "text/markdown",
-      content: document.text,
+      content: Buffer.from(document.text, "utf8"),
     });
     if (isErr(ingested)) throw ingested.error;
 

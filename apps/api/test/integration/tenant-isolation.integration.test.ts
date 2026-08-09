@@ -108,7 +108,7 @@ describe("Aislamiento entre inmobiliarias (Postgres real)", () => {
         title: "Tarifas de Beta",
         sourceType: DocumentSourceType.TEXT,
         mimeType: "text/markdown",
-        content: texto,
+        content: Buffer.from(texto, "utf8"),
       });
       if (isErr(documento)) throw documento.error;
 

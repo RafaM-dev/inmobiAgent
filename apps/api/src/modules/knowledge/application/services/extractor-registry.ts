@@ -21,14 +21,25 @@ export class ExtractorRegistry {
     return this.extractors.map((extractor) => extractor.name);
   }
 
-  extract(input: ExtractionInput): Result<ExtractedText, AppError> {
+  /** Tipos MIME admitidos, para el mensaje de error y para el navegador. */
+  get acceptedMimeTypes(): readonly string[] {
+    return this.extractors.flatMap((extractor) => extractor.accepts);
+  }
+
+  async extract(input: ExtractionInput): Promise<Result<ExtractedText, AppError>> {
     const extractor = this.extractors.find((candidate) => candidate.supports(input.mimeType));
 
     if (!extractor) {
+      /*
+       * La lista se calcula, no se escribe a mano. Cuando estaba escrita decía
+       * "texto plano y Markdown" y habría seguido diciéndolo después de añadir
+       * PDF y Word: un mensaje de error que miente es peor que no tenerlo,
+       * porque manda a quien lo lee a buscar en la dirección equivocada.
+       */
       return err(
         new ValidationError(
           `No sé leer archivos de tipo "${input.mimeType}". ` +
-            "Por ahora se admiten texto plano y Markdown.",
+            `Se admiten: ${this.acceptedMimeTypes.join(", ")}.`,
         ),
       );
     }

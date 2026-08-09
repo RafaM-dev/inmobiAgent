@@ -143,12 +143,31 @@ export const registerKnowledgeRoutes = (
       );
     }
 
+    /*
+     * El base64 se decodifica AQUÍ, en el borde, y no dentro del caso de uso.
+     * Que un PDF llegue en base64 es una consecuencia de haber elegido JSON
+     * para el transporte; el caso de uso solo tiene que saber de bytes.
+     *
+     * Node no falla ante un base64 inválido: descarta lo que no reconoce y
+     * devuelve lo que pueda. Por eso se comprueba re-codificando, en vez de
+     * dejar que un archivo cortado a la mitad se indexe como si estuviera bien.
+     */
+    let content: Buffer;
+    if (parsed.data.encoding === "base64") {
+      content = Buffer.from(parsed.data.content, "base64");
+      if (content.toString("base64") !== parsed.data.content.replace(/\s/g, "")) {
+        throw new ValidationError("El archivo llegó dañado. Vuelve a subirlo.");
+      }
+    } else {
+      content = Buffer.from(parsed.data.content, "utf8");
+    }
+
     const result = await deps.ingestDocument.execute({
       collectionId: parsed.data.collectionId,
       ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
       sourceType: parsed.data.sourceType,
       mimeType: parsed.data.mimeType,
-      content: parsed.data.content,
+      content,
     });
     if (isErr(result)) throw result.error;
 

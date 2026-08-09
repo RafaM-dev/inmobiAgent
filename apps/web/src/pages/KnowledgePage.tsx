@@ -51,10 +51,39 @@ const STATUS_VARIANT: Record<
 };
 
 /** Tipos que el extractor de texto plano sabe leer. Nada más se ofrece. */
-const ACCEPTED = ".txt,.md,.markdown,.csv";
+const ACCEPTED = ".txt,.md,.markdown,.csv,.pdf,.docx";
 
-const mimeFor = (fileName: string): string =>
-  /\.(md|markdown)$/i.test(fileName) ? "text/markdown" : "text/plain";
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/**
+ * Tipo por extensión, y NO `file.type`.
+ *
+ * El navegador rellena `file.type` a partir del registro del sistema, y en
+ * Windows llega vacío más veces de las que parece. La extensión la controla
+ * quien sube el archivo y no depende de cómo esté configurada su máquina.
+ */
+const mimeFor = (fileName: string): string => {
+  if (/\.pdf$/i.test(fileName)) return "application/pdf";
+  if (/\.docx$/i.test(fileName)) return DOCX;
+  if (/\.(md|markdown)$/i.test(fileName)) return "text/markdown";
+  if (/\.csv$/i.test(fileName)) return "text/csv";
+  return "text/plain";
+};
+
+/** Los formatos binarios no sobreviven a `file.text()`: viajan en base64. */
+const isBinary = (mimeType: string): boolean =>
+  mimeType === "application/pdf" || mimeType === DOCX;
+
+const toBase64 = async (file: File): Promise<string> => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // A trozos: `String.fromCharCode(...bytes)` con un archivo de varios megas
+  // revienta la pila de llamadas del navegador.
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(binary);
+};
 
 /**
  * Base de conocimiento.
@@ -127,7 +156,13 @@ export const KnowledgePage = (): ReactNode => {
     if (selected !== null) loadDocuments(selected);
   };
 
-  const ingest = (input: { title: string; content: string; mimeType: string; upload: boolean }) => {
+  const ingest = (input: {
+    title: string;
+    content: string;
+    mimeType: string;
+    upload: boolean;
+    encoding: "utf8" | "base64";
+  }) => {
     if (selected === null) return;
     setBusy(true);
     setError(null);
@@ -139,6 +174,7 @@ export const KnowledgePage = (): ReactNode => {
         sourceType: input.upload ? "UPLOAD" : "TEXT",
         mimeType: input.mimeType,
         content: input.content,
+        encoding: input.encoding,
       })
       .then((response) => {
         if (response.created) {
@@ -167,16 +203,30 @@ export const KnowledgePage = (): ReactNode => {
       content: text,
       mimeType: "text/plain",
       upload: false,
+      encoding: "utf8",
     });
   };
 
   const submitFile = (file: File): void => {
-    // El archivo se convierte a texto AQUÍ, no en el servidor: así lo que se
-    // envía es exactamente lo que se va a indexar, sin sorpresas por el medio.
-    file
-      .text()
+    /*
+     * Un PDF o un `.docx` se mandan TAL CUAL, en base64: el texto lo saca el
+     * servidor. Antes el navegador convertía el archivo a texto y por eso solo
+     * cabían formatos de texto; hacer aquí lo que hace falta para leer un PDF
+     * significaría llevar un lector de PDF a cada navegador y volver a
+     * comprobarlo cada vez que alguien cambie de móvil.
+     */
+    const mimeType = mimeFor(file.name);
+    const read = isBinary(mimeType) ? toBase64(file) : file.text();
+
+    read
       .then((content) => {
-        ingest({ title: file.name, content, mimeType: mimeFor(file.name), upload: true });
+        ingest({
+          title: file.name,
+          content,
+          mimeType,
+          upload: true,
+          encoding: isBinary(mimeType) ? "base64" : "utf8",
+        });
       })
       .catch(() => {
         setError("No se pudo leer el archivo");
@@ -246,7 +296,7 @@ export const KnowledgePage = (): ReactNode => {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Añadir a «{collection.name}»</CardTitle>
-              <CardDescription>Solo texto: .txt, .md, .csv</CardDescription>
+              <CardDescription>PDF, Word (.docx) y texto: .txt, .md, .csv</CardDescription>
             </CardHeader>
 
             <CardContent>

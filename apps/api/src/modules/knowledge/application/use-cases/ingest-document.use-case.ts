@@ -22,10 +22,19 @@ export interface IngestDocumentCommand {
   readonly title?: string;
   readonly sourceType: DocumentSourceType;
   readonly mimeType: string;
-  /** Contenido del archivo en UTF-8, o el texto pegado. */
-  readonly content: string;
+  /** Bytes del archivo. Ya decodificados: el borde HTTP se encarga del base64. */
+  readonly content: Buffer;
   readonly sourceUrl?: string;
 }
+
+/**
+ * Con qué forma queda guardado un documento tras extraerlo.
+ *
+ * Siempre texto, venga de donde venga: es Markdown porque los extractores
+ * conservan los encabezados y el troceado los usa para dar contexto a cada
+ * cita. Lo usa también el reindexado, que lee este artefacto y no el original.
+ */
+export const EXTRACTED_MIME = "text/markdown; charset=utf-8";
 
 export interface IngestedDocumentView {
   readonly documentId: string;
@@ -78,8 +87,7 @@ export class IngestDocumentUseCase {
       );
     }
 
-    const bytes = Buffer.byteLength(command.content, "utf8");
-    if (bytes > this.deps.maxDocumentBytes) {
+    if (command.content.byteLength > this.deps.maxDocumentBytes) {
       return err(
         new ValidationError(
           `El documento supera el máximo de ${String(
@@ -97,7 +105,7 @@ export class IngestDocumentUseCase {
       return err(new NotFoundError("Colección", command.collectionId ?? command.collectionSlug));
     }
 
-    const extracted = this.deps.extractors.extract({
+    const extracted = await this.deps.extractors.extract({
       content: command.content,
       mimeType: command.mimeType,
     });
@@ -126,15 +134,22 @@ export class IngestDocumentUseCase {
     const tenantId = TenantContext.requireTenantId();
 
     /*
-     * El original se guarda ANTES de la transacción, a propósito. Si la
-     * escritura en base fallara después, quedaría un archivo huérfano —barato
-     * de limpiar— en lugar de una fila que apunta a un archivo que no existe,
-     * que rompería el reindexado para siempre.
+     * Se guarda ANTES de la transacción, a propósito. Si la escritura en base
+     * fallara después, quedaría un archivo huérfano —barato de limpiar— en
+     * lugar de una fila que apunta a un archivo que no existe, que rompería el
+     * reindexado para siempre.
+     *
+     * Y lo que se guarda es el TEXTO YA EXTRAÍDO, no el archivo original. Con
+     * PDF y Word la diferencia importa: reindexar —al cambiar de modelo de
+     * embeddings, por ejemplo— no vuelve a abrir el PDF, así que es rápido,
+     * determinista y no depende de que la librería siga comportándose igual.
+     * Por eso se etiqueta como texto y no con el tipo del archivo de origen:
+     * el tipo original se conserva en el documento, para poder enseñarlo.
      */
     const stored = await this.deps.storage.put({
       key: `${tenantId}/knowledge/${documentId}`,
       content: Buffer.from(extracted.value.text, "utf8"),
-      contentType: command.mimeType,
+      contentType: EXTRACTED_MIME,
     });
     if (isErr(stored)) return stored;
 

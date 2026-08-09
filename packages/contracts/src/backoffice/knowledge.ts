@@ -58,11 +58,14 @@ export type KnowledgeDocumentListResponse = z.infer<typeof knowledgeDocumentList
 /**
  * Alta de documento.
  *
- * El contenido viaja como texto, no como `multipart`: el único extractor que
- * existe hoy es de texto plano (D26), y aceptar un PDF que después no se puede
- * leer sería prometer algo que el sistema no cumple. El navegador convierte el
- * archivo a texto antes de enviarlo, y lo que llega aquí es exactamente lo que
- * se va a indexar.
+ * El contenido viaja dentro del JSON y no como `multipart`. Es una decisión de
+ * proporción: los documentos de una inmobiliaria son reglamentos y requisitos,
+ * no vídeos, y el tope son unos pocos megas. `multipart` ahorraría el 33 % que
+ * cuesta base64 a cambio de un analizador de peticiones más, otro camino de
+ * errores y otro sitio donde equivocarse con los límites de tamaño.
+ *
+ * `encoding` existe porque un PDF o un `.docx` son BINARIOS: no sobreviven a
+ * pasar por una cadena UTF-8. El texto pegado a mano sigue viajando tal cual.
  */
 export const ingestDocumentRequestSchema = z.object({
   collectionId: idSchema,
@@ -70,6 +73,7 @@ export const ingestDocumentRequestSchema = z.object({
   sourceType: z.enum(["UPLOAD", "TEXT"]),
   mimeType: z.string().min(3).max(120),
   content: z.string().min(1),
+  encoding: z.enum(["utf8", "base64"]).default("utf8"),
 });
 export type IngestDocumentRequest = z.infer<typeof ingestDocumentRequestSchema>;
 

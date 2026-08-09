@@ -28,7 +28,14 @@ export const createServer = async (
     // configuración de redacción y correlación cubre HTTP, jobs y agente.
     logger: false,
     trustProxy: true,
-    bodyLimit: 5 * 1024 * 1024,
+    /*
+     * Holgado respecto al tope de documento (`KNOWLEDGE_MAX_DOCUMENT_BYTES`).
+     * Los archivos binarios viajan en base64 dentro del JSON, y base64 abulta
+     * un tercio más: con el límite justo, un PDF de exactamente el tamaño
+     * permitido se rechazaría aquí, antes de llegar a la validación que sabe
+     * explicar por qué.
+     */
+    bodyLimit: 12 * 1024 * 1024,
   });
 
   registerRequestContext(app, cradle.ids);

@@ -30,6 +30,8 @@ import type {
 } from "./domain/repositories/knowledge.repositories";
 import { MockEmbeddingProvider } from "./infrastructure/embeddings/mock/mock-embedding-provider";
 import { OpenAiCompatibleEmbeddingProvider } from "./infrastructure/embeddings/openai/openai-embedding-provider";
+import { DocxExtractor } from "./infrastructure/extraction/docx.extractor";
+import { PdfExtractor } from "./infrastructure/extraction/pdf.extractor";
 import { PlainTextExtractor } from "./infrastructure/extraction/plain-text.extractor";
 import {
   PrismaDocumentChunkRepository,
@@ -183,6 +185,8 @@ export const knowledgeModule: ModuleRegistration<Cradle, FastifyInstance> = {
       extractorRegistry: asFunction(() => {
         const registry = new ExtractorRegistry();
         registry.register(new PlainTextExtractor());
+        registry.register(new PdfExtractor());
+        registry.register(new DocxExtractor());
         return registry;
       }).singleton(),
 
