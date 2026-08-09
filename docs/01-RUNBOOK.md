@@ -329,9 +329,16 @@ Los volcados llevan datos reales de las inmobiliarias: `backups/` está en
 
 ```bash
 pnpm verify:full          # tipos, lint, arquitectura, unitarios e integración
+pnpm eval --provider anthropic   # ¿el agente sigue respondiendo bien? (cuesta)
 pnpm db:backup            # antes de migrar, siempre
 pnpm db:deploy            # provisiona el rol, migra y asegura los índices
 ```
+
+`verify:full` ya incluye la evaluación contra el simulador. La línea con
+`--provider` es la que responde la pregunta que el simulador no puede: si el
+modelo real sigue haciendo lo correcto. Es la comprobación que hay que hacer
+—aunque cueste unos céntimos— cuando lo que cambia es un prompt, el modelo o el
+proveedor.
 
 `db:deploy` es idempotente y reafirma en cada ejecución los atributos del rol de
 la aplicación: un `BYPASSRLS` puesto «para depurar» y olvidado se revierte solo
@@ -368,10 +375,11 @@ Escrito aquí y no en la cabeza de nadie:
   backup es manual y por tanto no existe cuando haga falta.
 - **No hay paneles.** Las alertas de `ops/prometheus/alerts.yml` están escritas;
   falta montar Prometheus y dibujar las gráficas.
-- **No hay evaluación automática de calidad del agente.** Es la carencia más
-  seria del producto: un cambio de prompt o una versión nueva de un modelo
-  pueden degradar las respuestas sin que ningún test lo note. Los guardrails
-  impiden los fallos graves —inventar precios, citar lo que no existe— pero no
-  miden si el agente responde *bien*.
+- **La evaluación de calidad no corre contra un modelo real de forma
+  automática.** El conjunto dorado existe y corre en cada `pnpm test` contra el
+  simulador, lo que cubre el arnés entero. Contra Anthropic u OpenAI hay que
+  lanzarlo a mano (`pnpm eval --provider …`) porque cuesta dinero y necesita
+  claves; decidir su cadencia —por ejemplo, antes de cada despliegue— está
+  pendiente.
 - **No hay simulacro de restauración periódico.** `pnpm db:verify-restore` se
   ejecuta a mano.

@@ -1,10 +1,12 @@
 import type { Clock } from "../../../platform/clock/clock";
 import { NoopUnitOfWork } from "../../../platform/database/unit-of-work";
+import type { EventSubscription } from "../../../platform/events/event";
 import type { EventPublisher } from "../../../platform/events/event-publisher";
 import { SequentialIdGenerator } from "../../../platform/ids/id-generator";
 import type { Logger } from "../../../platform/logging/logger";
 import type { ConversationService } from "../../conversation";
 import type { AdvisorDirectory, AdvisorView } from "../../identity";
+import { onPropertyShown } from "../application/event-handlers/on-property-shown";
 import type { LeadService } from "../application/ports/lead-service";
 import { LeadQualifier } from "../application/services/lead-qualifier";
 import { LeadServiceFacade } from "../application/services/lead-service.facade";
@@ -39,6 +41,15 @@ export interface InMemoryLeads {
   readonly service: LeadService;
   readonly repository: LeadRepository & InMemoryLeadRepository;
   readonly registerInterest: RegisterLeadInterestUseCase;
+  /**
+   * Las MISMAS suscripciones que registra el módulo al arrancar.
+   *
+   * Se exponen para que un arné pueda conectar la cadena completa —el catálogo
+   * muestra inmuebles, el CRM se llena solo— en vez de dar por hecho que
+   * funciona. Es la promesa del producto que menos se puede probar por partes:
+   * lo interesante es justamente que nadie llama al CRM a mano.
+   */
+  readonly subscriptions: readonly EventSubscription[];
 }
 
 export const createInMemoryLeads = (deps: {
@@ -76,16 +87,19 @@ export const createInMemoryLeads = (deps: {
     logger: deps.logger,
   });
 
+  const registerInterest = new RegisterLeadInterestUseCase({
+    leads: repository,
+    capture,
+    conversations: deps.conversations,
+    qualifier,
+    unitOfWork,
+    clock: deps.clock,
+  });
+
   return {
     repository,
-    registerInterest: new RegisterLeadInterestUseCase({
-      leads: repository,
-      capture,
-      conversations: deps.conversations,
-      qualifier,
-      unitOfWork,
-      clock: deps.clock,
-    }),
+    registerInterest,
     service: new LeadServiceFacade({ capture, markScheduled, leads: repository }),
+    subscriptions: [onPropertyShown({ registerInterest, logger: deps.logger })],
   };
 };

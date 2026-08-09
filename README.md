@@ -164,7 +164,7 @@ No son convenciones de equipo: son reglas ejecutables.
 
 ## Qué se prueba, y contra qué
 
-500 tests unitarios con dobles en memoria, y 63 de integración contra Postgres
+504 tests unitarios con dobles en memoria, y 63 de integración contra Postgres
 de verdad y la aplicación entera montada. La separación importa: `pnpm test`
 funciona en un clon recién hecho, `pnpm test:integration` exige la base
 levantada.
@@ -173,6 +173,21 @@ Los de integración cubren lo que ningún doble puede imitar honestamente: que e
 filtro por inmobiliaria esté de verdad en el SQL, el `unaccent` y el lematizador
 español de Postgres, el `SKIP LOCKED` del outbox, y el HTTP real con su guardia
 de sesión y su manejador de errores.
+
+Y una tercera suite que mide otra cosa: **si el agente responde bien**. 24
+conversaciones con lo que debería y no debería pasar en cada turno, juzgadas por
+código —nada de pedirle a otro modelo que puntúe—. Corre dentro de `pnpm test`
+contra el simulador, sin claves y sin coste; el mismo conjunto se lanza contra un
+modelo real con `pnpm eval --provider anthropic`.
+
+Un fallo *crítico* —inventar un precio, escribir una fecha, prometer en nombre de
+la inmobiliaria— hace fallar la ejecución por muy alta que sea la nota. Con una
+sola cifra, un precio inventado se compensaría con diez respuestas simpáticas.
+
+También encontró algo en su primera ejecución: *«¿qué requisitos piden para
+arrendar?»* no se respondía. La palabra «arrendar» hacía que el mensaje se
+tratara como una preferencia, se guardaba, y la pregunta se perdía. Sin error,
+sin log, sin test en rojo.
 
 La verificación de copias (`pnpm db:verify-restore`) encontró dos defectos más en
 su **primera** ejecución, y ninguno de los dos rompía nada: los índices HNSW y GIN
@@ -200,7 +215,7 @@ que no reconocía los epígrafes de Markdown pegados a su párrafo.
 | F6 | Canal WhatsApp: webhook firmado, credenciales cifradas, acuses de entrega | ✅ |
 | F7 | Back-office React: inbox en vivo, toma de control, leads, agenda, conocimiento, configuración, simulador | ✅ |
 | F8 | Proveedores reales de IA: Anthropic, OpenAI, Ollama | ✅ |
-| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · copias programadas, paneles, evaluación de calidad | En curso |
+| F9 | Producción: control de coste ✅ · Row Level Security ✅ · límites de ritmo ✅ · métricas ✅ · copias verificadas y runbook ✅ · evaluación de calidad ✅ · copias programadas, paneles | En curso |
 | F10 | Ver `docs/00-ARCHITECTURE.md` §13 | Pendiente |
 
 ### Qué hay funcionando hoy

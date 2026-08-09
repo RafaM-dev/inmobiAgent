@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "eval": "tsx --env-file=../../.env eval/cli.ts",
     "db:generate": "prisma generate",
     "db:migrate": "pnpm db:provision && prisma migrate dev && pnpm db:indexes",
     "db:deploy": "pnpm db:provision && prisma migrate deploy && pnpm db:indexes",

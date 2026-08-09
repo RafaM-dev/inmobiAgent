@@ -723,7 +723,7 @@ Cada fase termina con: tests verdes, demo funcionando **sin API keys**, y docume
 | **F6 — Canal WhatsApp** ✅ | Adaptador Cloud API: webhook firmado (HMAC sobre el cuerpo crudo), reparto del payload por número, mapeadores puros de entrada y salida, degradación de botones, credenciales cifradas por cuenta, acuses de entrega correlacionados. | ✅ Un webhook firmado entra por la API y recorre catálogo, agenda y conocimiento **sin tocar un solo caso de uso**; sin firma se rechaza con 403. Verificado contra un doble de la Graph API. Pendiente de una cuenta real: plantillas y media (§18.3). 381 tests. |
 | **F7 — Back-office React** ✅ | Sesiones opacas con cookie `httpOnly` y guardia que fija el `TenantContext`, API del panel, aplicación React 19 + Vite, inbox en vivo (SSE) con toma de control humano, leads, agenda, base de conocimiento (subir, reindexar, borrar), configuración del agente y **simulador**. Contratos Zod compartidos entre API y web. | ✅ Un asesor opera todo el producto desde el navegador: lee lo que vio el cliente **en bloques**, toma el control, devuelve la conversación al agente, sube un documento y lo ve indexarse, cambia el tono y prueba el resultado en el simulador —que habla por la **misma ruta pública que un cliente**—. Sin token en `localStorage` y sin API keys. 414 tests, 0 violaciones de arquitectura. |
 | **F8 — Providers reales** ✅ | Adaptadores de Anthropic (Messages API) y del formato Chat Completions —que sirve para OpenAI, Ollama y todo lo compatible—. Traducción en funciones puras y testeadas, coste estimado por turno, fallo al arrancar si falta una credencial. La suite de contrato corre contra los proveedores de verdad, y se salta sola cuando no hay clave. | ✅ `LLM_PROVIDER=anthropic` (u `openai`, u `ollama`) y **nada más cambia**: ni un caso de uso, ni una política, ni una herramienta. Sin `LLM_PROVIDER`, el producto sigue funcionando entero en modo demo sin ninguna clave. 436 tests, 0 violaciones de arquitectura. |
-| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Límites de ritmo** en dos ámbitos —mensajes por inmobiliaria en la puerta de los canales, turnos por contacto en el agente— sobre un cubo de fichas puro. **Métricas** en `GET /metrics` (formato Prometheus) detrás de un puerto: tráfico, latencias, turnos por desenlace, coste y retraso del outbox, sin un solo identificador en las etiquetas. **Copias verificadas**: `db:backup` y `db:verify-restore`, que restaura en una base desechable y comprueba RLS forzado, políticas, permisos, extensiones, índices y filas. **SLOs, alertas y runbook** en `ops/prometheus/alerts.yml` y `docs/01-RUNBOOK.md`. **Pendiente:** exportador OTLP (necesita un colector con el que probarlo), copias programadas, paneles, evaluación automática de calidad. | ✅ SLOs definidos y medidos; runbook de incidentes escrito, con cada alerta enlazada a su procedimiento y cada consulta SQL ejecutada contra la base real. |
+| **F9 — Producción** 🔶 | **Hecho:** control de coste por inmobiliaria (contador transaccional, tope mensual, degradación a persona, visible y editable en el panel). **RLS** con rol sin superusuario y políticas que fallan cerradas. **Límites de ritmo** en dos ámbitos —mensajes por inmobiliaria en la puerta de los canales, turnos por contacto en el agente— sobre un cubo de fichas puro. **Métricas** en `GET /metrics` (formato Prometheus) detrás de un puerto: tráfico, latencias, turnos por desenlace, coste y retraso del outbox, sin un solo identificador en las etiquetas. **Copias verificadas**: `db:backup` y `db:verify-restore`, que restaura en una base desechable y comprueba RLS forzado, políticas, permisos, extensiones, índices y filas. **SLOs, alertas y runbook** en `ops/prometheus/alerts.yml` y `docs/01-RUNBOOK.md`. **Evaluación automática de calidad** con juez determinista (§14 bis), en `pnpm test` contra el simulador y contra proveedores reales bajo demanda. **Pendiente:** exportador OTLP (necesita un colector con el que probarlo), copias programadas, paneles. | ✅ SLOs definidos y medidos; runbook de incidentes escrito, con cada alerta enlazada a su procedimiento y cada consulta SQL ejecutada contra la base real. |
 | **F10 — Escala** | Canales adicionales, memoria semántica, A/B de prompts, colas Redis, réplicas de lectura. | Extraer un módulo a servicio propio sin reescribir lógica. |
 
 ### Orden de implementación consciente
@@ -740,7 +740,39 @@ Se construye el canal **console/web antes que WhatsApp** a propósito: obliga a 
 | **Contract** | **Una misma suite corre contra Mock y contra el adaptador real de cada puerto** (`LLMProvider`, `PropertyService`, `VectorStore`, `ChatChannel`) | Vitest |
 | **Integración** | **Repositorios Prisma y rutas HTTP contra Postgres real y la aplicación entera montada** | **Vitest + Postgres del `docker compose`, base `…_test` (D41)** |
 | E2E conversacional | Guiones: "cliente busca apto en Medellín" → aserciones sobre estado final (lead creado, cita agendada) | Vitest + canal `console` |
-| Regresión de agente | `ReplayAgentRun` sobre fixtures grabados | Vitest |
+| **Calidad del agente** | **Conjunto dorado de conversaciones con juez determinista. Corre contra el simulador en cada `pnpm test`, y contra un modelo real con `pnpm eval --provider …`** | **`apps/api/eval/` (D70)** |
+
+### 14 bis. Evaluación de calidad
+
+El riesgo específico de un producto de IA no es que el código falle: es que
+**empeore sin que nada falle**. Un prompt retocado, una versión nueva del modelo
+o una herramienta modificada pueden degradar las respuestas mientras todos los
+tests siguen en verde, porque los tests comprueban que el código hace lo que se
+le pidió — no que el agente conteste bien.
+
+```
+pnpm test                          # incluye la evaluación contra el simulador
+pnpm eval                          # el informe completo, con desglose por área
+pnpm eval --tag seguridad          # solo un área, mientras se itera
+pnpm eval --provider anthropic     # el mismo conjunto contra un modelo real
+pnpm eval --update-baseline        # fija la referencia tras una mejora
+```
+
+**Dos clases de expectativa.** Las `critical` son defectos de producto —inventar
+un precio, escribir una fecha, prometer en nombre de la inmobiliaria, revelar
+datos de terceros— y una sola hace fallar la ejecución por muy alta que sea la
+puntuación. Las `quality` son la nota. Con una sola cifra, un precio inventado
+se compensaría con diez respuestas simpáticas.
+
+**Qué mide cada modo.** Con el simulador mide el ARNÉS: prompts, herramientas,
+políticas, guardrails, memoria y composición, que es la mayor parte del
+producto — y lo hace sin claves, sin coste y de forma determinista, por eso está
+dentro de `pnpm test`. El criterio del modelo solo se mide con un proveedor
+real; el informe dice siempre contra cuál se corrió.
+
+**La línea base** (`eval/baseline.json`) es lo que convierte un informe en una
+suite de regresión: «87 %» no dice nada, «87 % cuando ayer era 96 %» lo dice
+todo. Contra el simulador la tolerancia es cero.
 
 ### Dos suites, dos requisitos
 
@@ -883,6 +915,9 @@ Pasar a producción = cambiar variables de entorno. Ni un import distinto en el 
 | D67 | **Los índices que Prisma no sabe modelar se declaran en TypeScript y los guarda un test.** `prisma migrate dev` trata como deriva todo lo que su lenguaje de esquema no expresa: al generar la migración de F7 tiró el HNSW de pgvector y el GIN del full-text, creados con SQL crudo en F5. **Sobrevivió tres fases porque no rompe nada** — los resultados seguían siendo correctos, solo que recorriendo la tabla entera; un test de resultados no podía verlo. Ahora: el GIN está declarado en el modelo (Prisma ya no lo toca), `db:migrate` y `db:deploy` terminan ejecutando `db:indexes` —idempotente— y un test de integración compara `prisma/indexes/search-indexes.ts` con `pg_am`, incluyendo un barrido que falla si aparece cualquier índice no-btree sin declarar. Lo destapó `db:verify-restore` en su primera ejecución. | ✅ Cerrada | 2026-08-08 |
 | D68 | **El aprovisionamiento reasigna la propiedad de las tablas al rol de la aplicación.** Las migraciones corren con ese rol y en PostgreSQL solo el DUEÑO puede alterar una tabla: en una base creada antes de separar los roles (D55), las tablas son del administrador y la siguiente migración muere con «must be owner of table». Le pasó a la base de desarrollo de este repositorio. Reasignar no abre ningún agujero, y ese es exactamente el motivo por el que las políticas se declararon con **FORCE**: sin él, el dueño se salta su propia RLS. | ✅ Cerrada | 2026-08-08 |
 | D69 | **Una copia se da por buena cuando se ha restaurado y comprobado, no cuando existe el fichero.** `db:verify-restore` la restaura en una base desechable y verifica lo que este sistema necesita para seguir siendo correcto: RLS activo **y forzado**, políticas presentes, permisos del rol, extensiones, el índice HNSW, el recuento de filas y la migración a la que corresponde. Cada punto está porque su ausencia falla **en silencio** — el caso peor es un volcado hecho con el rol de la aplicación, que con RLS forzado sale con el esquema entero y cero filas, y tiene exactamente el mismo aspecto que uno bueno. | ✅ Cerrada | 2026-08-08 |
+
+| D70 | **La calidad del agente se evalúa con un juez DETERMINISTA, no con otro modelo.** «Que un LLM puntúe la respuesta» exige una clave —lo que este producto se niega a requerir—, cuesta dinero en cada ejecución y da un número distinto cada vez, así que no sirve como suite de regresión. Todas las comprobaciones son código: expresiones regulares, herramientas invocadas, estado del CRM y de la agenda. Y **dos clases de expectativa, no una nota media**: un fallo `critical` —inventar un precio, escribir una fecha, prometer en nombre de la inmobiliaria— hace fallar la ejecución por muy alta que sea la puntuación. Con una sola nota, un precio inventado se compensaría con diez respuestas simpáticas. Corre en `pnpm test` contra el simulador (sin claves, sin coste) y con `pnpm eval --provider anthropic` contra un modelo real: lo primero mide el ARNÉS —prompts, herramientas, políticas, guardrails, memoria—, lo segundo el criterio del modelo. La suite encontró en su primera ejecución que una pregunta con una palabra de preferencia dentro («¿qué requisitos piden para **arrendar**?») se tragaba la pregunta y solo guardaba la preferencia. | ✅ Cerrada | 2026-08-08 |
+| D71 | **El doble de eventos de los tests ENTREGA, no solo apunta.** `RecordingEventPublisher` únicamente registraba, así que la cadena «el catálogo muestra inmuebles → el CRM se llena solo» —una de las promesas centrales del producto— nunca se ejecutaba en ningún test, y la evaluación reportaba un CRM vacío. `DispatchingEventPublisher` invoca las suscripciones reales del módulo, que ahora los dobles exponen. La entrega es sincrónica a diferencia de producción: es una simplificación consciente y en la dirección segura, porque aquí se comprueba QUÉ pasa y no CUÁNDO — lo asíncrono (reserva, reintentos, dead-letter) tiene su propia suite contra Postgres. | ✅ Cerrada | 2026-08-08 |
 
 ## 18. Decisiones abiertas
 

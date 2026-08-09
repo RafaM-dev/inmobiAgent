@@ -110,23 +110,41 @@ export class MockLLMProvider implements LLMProvider {
       ]);
     }
 
-    const slots = extractSlots(userText);
-    if (hasAnySlot(slots) && available.has("save_customer_preferences")) {
-      return this.toolCalls([{ name: "save_customer_preferences", arguments: { ...slots } }]);
-    }
-
     /*
      * Una pregunta que no va de inmuebles va de cómo funcionan las cosas:
      * requisitos, políticas, trámites. Eso se consulta en la documentación de
      * la inmobiliaria, nunca se responde de memoria.
      */
-    if (
-      (intent === Intent.QUESTION || intent === Intent.FAQ) &&
-      available.has("search_knowledge")
-    ) {
+    const esPregunta =
+      (intent === Intent.QUESTION || intent === Intent.FAQ) && available.has("search_knowledge");
+
+    const slots = extractSlots(userText);
+    const hayQueGuardar = hasAnySlot(slots) && available.has("save_customer_preferences");
+
+    /*
+     * Una PREGUNTA se responde aunque de paso mencione una preferencia.
+     *
+     * «¿Qué requisitos piden para arrendar?» contiene la palabra "arrendar", y
+     * quedarse ahí —guardar la preferencia y devolver otra pregunta de
+     * descubrimiento— deja al cliente sin su respuesta. No falla nada, no hay
+     * error en ningún log: la pregunta simplemente se pierde. Lo encontró la
+     * suite de evaluación (D70).
+     *
+     * Se hacen las DOS cosas en el mismo turno: se guarda lo que dijo y se
+     * busca lo que preguntó. El bucle de herramientas admite varias llamadas
+     * por iteración, y la presentación da prioridad al conocimiento.
+     */
+    if (esPregunta) {
       return this.toolCalls([
+        ...(hayQueGuardar
+          ? [{ name: "save_customer_preferences", arguments: { ...slots } }]
+          : []),
         { name: "search_knowledge", arguments: { question: userText.slice(0, 300) } },
       ]);
+    }
+
+    if (hayQueGuardar) {
+      return this.toolCalls([{ name: "save_customer_preferences", arguments: { ...slots } }]);
     }
 
     // Nada nuevo que guardar, nada que preguntar y el cliente quiere ver algo:

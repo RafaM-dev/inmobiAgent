@@ -134,6 +134,9 @@ export default tseslint.config(
       "**/*.config.{js,ts}",
       "**/scripts/**/*.ts",
       "**/prisma/seed/**/*.ts",
+      // La evaluación de calidad es también una herramienta de terminal: su
+      // salida —el informe— es su razón de ser.
+      "**/eval/**/*.ts",
     ],
     rules: {
       "no-console": "off",

@@ -10,10 +10,16 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
-    // Solo `src/`. La suite de integración vive en `test/` con su propia
-    // configuración: necesita Postgres levantado, y `pnpm test` tiene que
-    // funcionar en un clon recién hecho.
-    include: ["src/**/*.{test,spec}.ts"],
+    /*
+     * `src/` y la evaluación de calidad. La suite de integración vive en
+     * `test/` con su propia configuración: necesita Postgres levantado, y
+     * `pnpm test` tiene que funcionar en un clon recién hecho.
+     *
+     * La evaluación entra aquí a propósito. Corre contra el simulador —sin
+     * claves, sin coste y determinista—, y una suite de evaluación que solo se
+     * ejecuta a mano se ejecuta la semana que se escribe y nunca más.
+     */
+    include: ["src/**/*.{test,spec}.ts", "eval/**/*.eval.test.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

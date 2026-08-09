@@ -1,6 +1,6 @@
 import { FixedClock } from "../../../platform/clock/clock";
 import type { AppError } from "../../../platform/errors/app-error";
-import { RecordingEventPublisher } from "../../../platform/events/event-publisher";
+import { DispatchingEventPublisher } from "../../../platform/events/event-publisher";
 import { SequentialIdGenerator } from "../../../platform/ids/id-generator";
 import { NoopLogger } from "../../../platform/logging/logger";
 import { InMemoryRateLimiter } from "../../../platform/rate-limit/in-memory-rate-limiter";
@@ -225,7 +225,7 @@ export interface Harness {
   readonly runTurn: RunAgentTurnUseCase;
   readonly conversations: FakeConversationService;
   readonly runs: InMemoryAgentRunRepository;
-  readonly events: RecordingEventPublisher;
+  readonly events: DispatchingEventPublisher;
   readonly catalog: InMemoryCatalog;
   readonly leads: InMemoryLeads;
   readonly appointments: InMemoryAppointments;
@@ -258,9 +258,15 @@ export const createHarness = (options: {
   const tokens = new HeuristicTokenCounter();
   const conversations = new FakeConversationService(options.missing ?? []);
   const runs = new InMemoryAgentRunRepository();
-  const events = new RecordingEventPublisher();
   const logger = new NoopLogger();
   const clock = new FixedClock(HARNESS_NOW);
+  /*
+   * Entrega los eventos además de apuntarlos. Sin esto, la cadena "el catálogo
+   * muestra inmuebles → el CRM se llena solo" nunca se ejecuta en los tests, y
+   * una de las promesas centrales del producto quedaría sin comprobar de punta
+   * a punta. Las suscripciones se registran más abajo, cuando existen.
+   */
+  const events = new DispatchingEventPublisher({ clock, ids: new SequentialIdGenerator("evt") });
 
   const prompts = new PromptRegistry();
   prompts.register(systemPromptV1);
@@ -280,6 +286,9 @@ export const createHarness = (options: {
   });
 
   const knowledge = createInMemoryKnowledge({ events, clock, logger });
+
+  // Las mismas suscripciones que registra el módulo al arrancar.
+  events.subscribe(...leads.subscriptions);
 
   const registry = new PrometheusMetrics({ logger });
   const metrics = createAppMetrics(registry);

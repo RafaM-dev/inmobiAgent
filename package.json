@@ -22,6 +22,7 @@
     "arch:graph": "depcruise apps/api/src --config .dependency-cruiser.cjs --output-type dot > docs/diagrams/deps.dot",
     "test": "pnpm -r test",
     "test:integration": "pnpm --filter @agentinmobi/api test:integration",
+    "eval": "pnpm --filter @agentinmobi/api eval",
     "verify": "pnpm typecheck && pnpm lint && pnpm arch:check && pnpm test",
     "verify:full": "pnpm verify && pnpm test:integration",
     "infra:up": "docker compose up -d",
