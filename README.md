@@ -168,7 +168,7 @@ En **Fly.io**, que es el destino preparado, `fly.toml` ya lo describe todo y
 fly launch --no-deploy --copy-config
 fly postgres create --name agentinmobi-db
 fly postgres attach agentinmobi-db
-fly volumes create agentinmobi_data --size 3 --region bog   # el disco de los documentos
+fly volumes create agentinmobi_data --size 3 --region iad   # el disco de los documentos
 fly secrets set ENCRYPTION_KEY="$(openssl rand -base64 32)"
 fly deploy
 ```

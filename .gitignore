@@ -5,9 +5,10 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Cualquier .env, no solo el de desarrollo: el de produccion lleva la cadena de
+# conexion con contrasena dentro. Solo el de ejemplo entra al repositorio.
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 
 logs/

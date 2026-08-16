@@ -15,7 +15,7 @@
 # únicos en toda la plataforma.
 
 app = "agentinmobi"
-primary_region = "bog"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
@@ -69,7 +69,7 @@ primary_region = "bog"
 
 [mounts]
   # Créalo antes del primer despliegue, en la misma región:
-  #   fly volumes create agentinmobi_data --size 3 --region bog
+  #   fly volumes create agentinmobi_data --size 3 --region iad
   #
   # Un volumen ata la aplicación a UNA máquina, y está bien: escalar a varias
   # exige antes resolver los trabajos programados duplicados y los límites de
