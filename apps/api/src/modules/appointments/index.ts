@@ -190,6 +190,8 @@ export const appointmentsModule: ModuleRegistration<Cradle, FastifyInstance> = {
   registerRoutes(app: FastifyInstance, cradle: Cradle): void {
     registerAppointmentsRoutes(app, {
       listAppointments: cradle.listAppointments,
+      confirmAppointment: cradle.confirmAppointment,
+      cancelAppointment: cradle.cancelAppointment,
       requireSession: requireSession({
         sessions: cradle.sessionService,
         isProduction: cradle.config.isProduction,

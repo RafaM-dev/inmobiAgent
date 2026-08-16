@@ -1,4 +1,5 @@
 import {
+  appointmentActionResponseSchema,
   appointmentListResponseSchema,
   channelAccountListResponseSchema,
   connectChannelResponseSchema,
@@ -9,13 +10,18 @@ import {
   knowledgeCollectionListResponseSchema,
   knowledgeDocumentListResponseSchema,
   leadListResponseSchema,
+  leadSummarySchema,
   redeemTokenResponseSchema,
   sessionResponseSchema,
   settingsResponseSchema,
   teamListResponseSchema,
   teamMemberSchema,
   usageSummarySchema,
+  type AppointmentActionResponse,
   type AppointmentListResponse,
+  type AssignLeadRequest,
+  type CancelAppointmentRequest,
+  type ChangeLeadStatusRequest,
   type ChannelAccountListResponse,
   type ConnectChannelResponse,
   type ConnectWhatsAppRequest,
@@ -34,6 +40,7 @@ import {
   type KnowledgeCollectionListResponse,
   type KnowledgeDocumentListResponse,
   type LeadListResponse,
+  type LeadSummaryContract,
   type LoginRequest,
   type SessionResponse,
   type SettingsResponse,
@@ -87,8 +94,32 @@ export const api = {
   leads: (filters: { band?: string; status?: string; mine?: boolean } = {}): Promise<LeadListResponse> =>
     request(`/api/leads${query(filters)}`, leadListResponseSchema),
 
+  changeLeadStatus: (
+    leadId: string,
+    body: ChangeLeadStatusRequest,
+  ): Promise<LeadSummaryContract> =>
+    request(`/api/leads/${leadId}/status`, leadSummarySchema, { method: "PATCH", body }),
+
+  assignLead: (leadId: string, body: AssignLeadRequest): Promise<LeadSummaryContract> =>
+    request(`/api/leads/${leadId}/assignment`, leadSummarySchema, { method: "PATCH", body }),
+
   appointments: (filters: { days?: number; mine?: boolean } = {}): Promise<AppointmentListResponse> =>
     request(`/api/appointments${query(filters)}`, appointmentListResponseSchema),
+
+  confirmAppointment: (appointmentId: string): Promise<AppointmentActionResponse> =>
+    request(`/api/appointments/${appointmentId}/confirm`, appointmentActionResponseSchema, {
+      method: "POST",
+      body: {},
+    }),
+
+  cancelAppointment: (
+    appointmentId: string,
+    body: CancelAppointmentRequest = {},
+  ): Promise<AppointmentActionResponse> =>
+    request(`/api/appointments/${appointmentId}/cancel`, appointmentActionResponseSchema, {
+      method: "POST",
+      body,
+    }),
 
   /* ---------------------------------------------------------------- saber */
 

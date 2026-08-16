@@ -41,6 +41,21 @@ const TRANSITIONS: Record<LeadStatus, readonly LeadStatus[]> = {
   LOST: [],
 };
 
+/**
+ * A qué estados puede pasar un lead que está en `from`.
+ *
+ * Existe para que el back-office pinte solo los cambios posibles SIN copiarse la
+ * tabla: la regla se consulta, no se replica. Devuelve una copia para que nadie
+ * pueda mutar el embudo desde fuera del agregado.
+ */
+export const allowedTransitions = (from: LeadStatus): readonly LeadStatus[] => [
+  ...TRANSITIONS[from],
+];
+
+/** Si `changeStatus(to)` va a ser aceptado. Misma tabla, sin lanzar. */
+export const canTransition = (from: LeadStatus, to: LeadStatus): boolean =>
+  TRANSITIONS[from].includes(to);
+
 export interface LeadConsent {
   readonly dataProcessing: boolean;
   readonly marketing: boolean;
@@ -220,6 +235,21 @@ export class Lead {
     if (this.props.assignedUserId === userId) return false;
     this.props = { ...this.props, assignedUserId: userId, updatedAt: now };
     this.record("assigned", now, { userId });
+    return true;
+  }
+
+  /**
+   * Devuelve el lead al montón. No es deshacer una asignación: es un hecho del
+   * negocio —el asesor se va, deja de estar disponible— y por eso queda en el
+   * histórico con el nombre de quien lo tenía, no borrando el rastro anterior.
+   */
+  unassign(now: Date): boolean {
+    const previous = this.props.assignedUserId;
+    if (previous === undefined) return false;
+
+    const { assignedUserId: _removed, ...rest } = this.props;
+    this.props = { ...rest, updatedAt: now };
+    this.record("unassigned", now, { previousUserId: previous });
     return true;
   }
 

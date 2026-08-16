@@ -12,6 +12,10 @@ import { LeadQualifier } from "./application/services/lead-qualifier";
 import { LeadServiceFacade } from "./application/services/lead-service.facade";
 import { CaptureLeadUseCase } from "./application/use-cases/capture-lead.use-case";
 import { ListLeadsUseCase } from "./application/use-cases/list-leads.use-case";
+import {
+  AssignLeadUseCase,
+  ChangeLeadStatusUseCase,
+} from "./application/use-cases/manage-lead.use-cases";
 import { MarkLeadScheduledUseCase } from "./application/use-cases/mark-lead-scheduled.use-case";
 import { RegisterLeadInterestUseCase } from "./application/use-cases/register-lead-interest.use-case";
 import type { LeadRepository } from "./domain/repositories/lead.repository";
@@ -62,6 +66,8 @@ export interface LeadsCradle {
   registerLeadInterest: RegisterLeadInterestUseCase;
   markLeadScheduled: MarkLeadScheduledUseCase;
   listLeads: ListLeadsUseCase;
+  changeLeadStatus: ChangeLeadStatusUseCase;
+  assignLead: AssignLeadUseCase;
   /** Puerto público: es lo que consumen el agente y `appointments`. */
   leadService: LeadService;
 }
@@ -125,6 +131,27 @@ export const leadsModule: ModuleRegistration<Cradle, FastifyInstance> = {
 
       listLeads: asFunction((c: Cradle) => new ListLeadsUseCase({ leads: c.leadRepository })),
 
+      changeLeadStatus: asFunction(
+        (c: Cradle) =>
+          new ChangeLeadStatusUseCase({
+            leads: c.leadRepository,
+            unitOfWork: c.unitOfWork,
+            events: c.eventPublisher,
+            clock: c.clock,
+          }),
+      ).singleton(),
+
+      assignLead: asFunction(
+        (c: Cradle) =>
+          new AssignLeadUseCase({
+            leads: c.leadRepository,
+            advisors: c.advisorDirectory,
+            unitOfWork: c.unitOfWork,
+            events: c.eventPublisher,
+            clock: c.clock,
+          }),
+      ).singleton(),
+
       leadService: asFunction(
         (c: Cradle): LeadService =>
           new LeadServiceFacade({
@@ -139,6 +166,8 @@ export const leadsModule: ModuleRegistration<Cradle, FastifyInstance> = {
   registerRoutes(app: FastifyInstance, cradle: Cradle): void {
     registerLeadsRoutes(app, {
       listLeads: cradle.listLeads,
+      changeLeadStatus: cradle.changeLeadStatus,
+      assignLead: cradle.assignLead,
       requireSession: requireSession({
         sessions: cradle.sessionService,
         isProduction: cradle.config.isProduction,
